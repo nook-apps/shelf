@@ -1,3 +1,15 @@
+shelf (0.5.0) unstable; urgency=medium
+
+  * Redo with Ctrl+Shift+Z or Ctrl+Y; rubber-band selection; quick look on Space.
+  * Extract and compress archives from the file menu.
+  * Icons are tinted and glass emblems baked in C++: much cheaper than per-icon effects.
+  * Smooth zoom (about 15-20 ms per frame instead of 200); Ctrl+- works again.
+  * Faster startup: settings and first-run dialogs are created when first opened.
+  * Trash icon and path bar segments animate; icons glide when the grid is zoomed.
+  * No automatic selection on opening a folder; the focused file shows its full name.
+
+ -- Stasyao37 <kapitonov.stass@gmail.com>  Sat, 07 Nov 2026 12:00:00 +0300
+
 shelf (0.4.0) unstable; urgency=medium
 
   * Name clashes on copy, move and paste: replace, skip or keep both; folders merge, replaced files go to the trash.

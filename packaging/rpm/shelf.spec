@@ -1,5 +1,5 @@
 Name:           shelf
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Glass file manager for Hyprland in Qt 6 / QML
 
@@ -65,6 +65,14 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.S
 %{_datadir}/xdg-desktop-portal/portals/shelf.portal
 
 %changelog
+* Sat Nov 07 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.0-1
+- Redo with Ctrl+Shift+Z or Ctrl+Y; rubber-band selection; quick look on Space
+- Extract and compress archives from the file menu
+- Icons are tinted and glass emblems baked in C++: much cheaper than per-icon effects
+- Smooth zoom (about 15-20 ms per frame instead of 200); Ctrl+- works again
+- Faster startup: settings and first-run dialogs are created when first opened
+- Trash icon and path bar segments animate; icons glide when the grid is zoomed
+- No automatic selection on opening a folder; the focused file shows its full name
 * Thu Oct 29 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.4.0-1
 - Name clashes on copy, move and paste: replace, skip or keep both; folders merge, replaced files go to the trash
 - Ctrl+Z undoes moves, copies, replaces, trashing, renames and new folders
