@@ -47,8 +47,13 @@ Item {
         }
     }
 
+    // Размер — от картинки, а не anchors.fill: MultiEffect берёт размер источника в тот момент,
+    // когда меняется его собственный размер, и дальше за источником не следит. С anchors.fill он
+    // мог застать ещё старый размер картинки, и после скачка (смена вида, зум без анимаций)
+    // миниатюра съезжала и сжималась, пока плитку не создадут заново
     MultiEffect {
-        anchors.fill: parent
+        width: img.width
+        height: img.height
         visible: root.ready
         source: img
         maskEnabled: true
