@@ -320,5 +320,8 @@
   "удаление в корзину %1": "moving %1 to the Trash",
   "уже подключён": "already connected",
   "установите любой терминал": "install any terminal",
-  "цвета и стекло шелла": "the shell's colors and glass"
+  "цвета и стекло шелла": "the shell's colors and glass",
+  "Запоминать вид для каждой папки": "Remember view for each folder",
+  "Сбросить вид этой папки": "Reset view for this folder",
+  "Не удалось сохранить вид папки": "Could not save folder view"
 }

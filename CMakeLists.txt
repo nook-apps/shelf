@@ -86,6 +86,7 @@ qt_add_qml_module(shelf
         src/Apps.h src/Apps.cpp
         src/Trash.h src/Trash.cpp
         src/Session.h src/Session.cpp
+        src/FolderViews.h src/FolderViews.cpp
         src/Terminal.h src/Terminal.cpp
         src/Environment.h src/Environment.cpp
         src/Picker.h src/Picker.cpp
@@ -126,7 +127,7 @@ if(SHELF_TESTS)
     qt_add_executable(shelf_tests tests/tst_core.cpp
         src/DirModel.h src/DirModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
         src/Trash.h src/Trash.cpp src/Terminal.h src/Terminal.cpp src/Language.h src/Language.cpp
-        src/GlassIcons.h src/GlassIcons.cpp)
+        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp)
     qt_add_resources(shelf_tests "i18n" PREFIX "/" FILES ${I18N_FILES})
     target_include_directories(shelf_tests PRIVATE src)
     target_link_libraries(shelf_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent)

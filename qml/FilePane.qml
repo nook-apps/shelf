@@ -21,6 +21,7 @@ FocusScope {
     property bool ready: false
     Behavior on iconShown { enabled: pane.ready; NumberAnimation { duration: Theme.dur(160); easing.type: Easing.OutCubic } }
     // Ctrl+колесо: +1 крупнее, -1 мельче
+    signal sortRequested(string key)
     signal zoomRequested(int step)
     onIconSizeChanged: relayout()
     function relayout() {
@@ -296,8 +297,7 @@ FocusScope {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    if (cell.sorted) pane.model.sortDesc = !pane.model.sortDesc
-                    else { pane.model.sortKey = cell.key; pane.model.sortDesc = false }
+                    pane.sortRequested(cell.key)
                 }
             }
         }

@@ -1,6 +1,7 @@
 // Модель папки и операции с файлами — без QML, на временных папках; подкраска иконок.
 // Корзина и настройки — тоже во временной папке: HOME и XDG_* подменяются до первого обращения
 #include "DirModel.h"
+#include "FolderViews.h"
 #include "FileOps.h"
 #include "GlassIcons.h"
 #include "Language.h"
@@ -8,6 +9,8 @@
 #include <QAbstractItemModelTester>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QSignalSpy>
@@ -53,6 +56,7 @@ private slots:
     {
         QVERIFY(m_home.isValid());
         qputenv("HOME", m_home.path().toUtf8());
+        qputenv("XDG_STATE_HOME", (m_home.path() + "/.local/state").toUtf8());
         qputenv("XDG_DATA_HOME", (m_home.path() + "/.local/share").toUtf8());
         qputenv("XDG_CONFIG_HOME", (m_home.path() + "/.config").toUtf8());
         // Qt создаёт корзину без mkpath: ~/.local/share должна уже быть
@@ -64,6 +68,62 @@ private slots:
     {
         m_dir = m_home.path() + "/w/" + QTest::currentTestFunction();
         QVERIFY(QDir().mkpath(m_dir));
+    }
+
+    void folderViewsPersistAndReset()
+    {
+        const auto file = m_home.path() + "/.local/state/shelf/folder-views.json";
+        QFile::remove(file);
+        const QVariantMap view{{"sortKey", "date"}, {"sortDesc", true}, {"gridMode", false}, {"iconSize", 112}};
+        FolderViews store;
+        QVERIFY(store.get(m_dir).isEmpty());
+        QVERIFY(!QFile::exists(file)); // простое открытие не закрепляет вид
+        QVERIFY(store.save(m_dir, view));
+        FolderViews other;
+        QCOMPARE(other.get(m_dir), view); // новый экземпляр читает с диска
+        const auto alias = m_dir + "-link";
+        QVERIFY(QFile::link(m_dir, alias));
+        QCOMPARE(other.get(alias), view); // ключ — канонический путь
+        auto invalid = view;
+        invalid["iconSize"] = -1;
+        QVERIFY(!other.save(m_dir, invalid));
+        QCOMPARE(store.get(m_dir), view);
+        QVERIFY(other.reset(alias));
+        QVERIFY(store.get(m_dir).isEmpty());
+        QVERIFY(store.save(m_dir, view));
+        QVERIFY(QDir(m_dir).removeRecursively());
+        QVERIFY(other.get(m_dir).isEmpty());
+        QFile::remove(alias);
+    }
+
+    void folderViewsEvictionAndPruning()
+    {
+        const auto file = m_home.path() + "/.local/state/shelf/folder-views.json";
+        const QVariantMap view{{"sortKey", "name"}, {"sortDesc", false}, {"gridMode", true}, {"iconSize", 56}};
+        QJsonObject entries;
+        for (int i = 0; i < FolderViews::limit; ++i) {
+            const auto path = m_dir + "/" + QString::number(i);
+            QVERIFY(QDir().mkpath(path));
+            auto entry = QJsonObject::fromVariantMap(view);
+            entry.insert("saved", i + 1);
+            entries.insert(path, entry);
+        }
+        // Исчезнувшая папка очищается при чтении.
+        entries.insert(m_dir + "/gone", QJsonObject::fromVariantMap(view));
+        write(file, QJsonDocument(entries).toJson());
+        FolderViews store;
+        QVERIFY(store.save(m_dir, view));
+        QVERIFY(store.get(m_dir + "/0").isEmpty());
+        QCOMPARE(store.get(m_dir + "/1"), view);
+        QCOMPARE(store.get(m_dir), view);
+        const auto saved = QJsonDocument::fromJson(read(file)).object();
+        QCOMPARE(saved.size(), FolderViews::limit);
+        QVERIFY(!saved.contains(m_dir + "/gone"));
+        // Повреждённый файл не мешает сохранить новый вид.
+        write(file, "broken");
+        QVERIFY(store.get(m_dir).isEmpty());
+        QVERIFY(store.save(m_dir, view));
+        QCOMPARE(store.get(m_dir), view);
     }
 
     // ── DirModel ───────────────────────────────────────────────────
