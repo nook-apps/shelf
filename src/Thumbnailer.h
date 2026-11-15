@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QCache>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -41,6 +42,7 @@ private slots:
     void onError(uint handle, const QStringList &uris, int code, const QString &message);
 
 private:
+    friend class TestResources;
     struct Known {
         qint64 mtime = 0;
         QString url;
@@ -56,8 +58,8 @@ private:
     bool m_supportedLoaded = false;
     QSet<QString> m_supported; // MIME-типы, которые tumbler умеет для file://
     int m_maxFlavor = 1;                // самый крупный размер, который умеет tumbler
-    QHash<QString, Known> m_known;      // ключ — номер размера и путь
-    QHash<QString, qint64> m_never;     // путь → mtime: миниатюры нет и не будет
+    QCache<QString, Known> m_known{4096};      // ключ — номер размера и путь
+    QCache<QString, qint64> m_never{4096};     // путь → mtime: миниатюры нет и не будет
     QHash<int, QHash<QString, QString>> m_queue; // размер → путь → MIME, ждут отправки
     QSet<QString> m_pending;            // отправлены tumbler'у (ключ как у m_known)
     QTimer m_flushTimer;

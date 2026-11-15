@@ -132,6 +132,12 @@ if(SHELF_TESTS)
     target_include_directories(shelf_tests PRIVATE src)
     target_link_libraries(shelf_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent)
     add_test(NAME core COMMAND shelf_tests)
+    qt_add_executable(shelf_resource_tests tests/tst_resources.cpp
+        src/Thumbnailer.h src/Thumbnailer.cpp src/portal/FileChooser.h src/portal/FileChooser.cpp)
+    target_include_directories(shelf_resource_tests PRIVATE src)
+    target_compile_definitions(shelf_resource_tests PRIVATE SHELF_EXE="/nonexistent-shelf-test-installed")
+    target_link_libraries(shelf_resource_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::DBus)
+    add_test(NAME resources COMMAND shelf_resource_tests)
     # Все строки интерфейса переведены, лишних в словарях нет
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)

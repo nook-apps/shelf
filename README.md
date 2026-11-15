@@ -317,3 +317,5 @@ Shelf распространяется под [GNU GPL v3](LICENSE) или бо�
 
 - Шрифт значков `fonts/` — SIL Open Font License 1.1 (`fonts/OFL.txt`), значки Nerd Fonts — MIT / OFL
 - Логотипы языков в `icons/lang/` — CC0 ([Simple Icons](https://simpleicons.org))
+
+План работ по производительности и ресурсам после аудита: [docs/PERFORMANCE_PLAN.md](docs/PERFORMANCE_PLAN.md).
