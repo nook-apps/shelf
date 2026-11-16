@@ -1,12 +1,15 @@
 """release-notes.py 0.2.2 > notes.md — заметки к выпуску: таблица установки и раздел CHANGELOG."""
 import re
 import sys
+from pathlib import Path
 
 v = sys.argv[1]
 text = open("CHANGELOG.md", encoding="utf-8").read()
 m = re.search(rf"^## {re.escape(v)}\b[^\n]*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
 if not m:
     sys.exit(f"В CHANGELOG.md нет раздела {v}")
+if Path(f"docs/release-cards/shelf-{v}.png").is_file():
+    print(f"![Shelf {v}](https://github.com/nook-apps/shelf/releases/download/v{v}/shelf-{v}.png)\n")
 print(f"""## Установка
 
 | Система | Как поставить |

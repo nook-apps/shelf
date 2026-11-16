@@ -180,5 +180,8 @@ jobs:
           (cd src && python3 ../.github/scripts/release-notes.py "$V") > notes.md
           rm -f dist/shelf-"$V".tar.gz
           mv dist/SRCINFO dist/SRCINFO.txt
+          if [ -f "src/docs/release-cards/shelf-$V.png" ]; then
+            cp "src/docs/release-cards/shelf-$V.png" dist/
+          fi
           ls -la dist
           gh release create "$TAG" --repo "${{ github.repository }}" --verify-tag --latest --title "Shelf $V" --notes-file notes.md dist/*
