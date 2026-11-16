@@ -212,23 +212,29 @@ private slots:
     {
         for (int i = 0; i < 10000; ++i)
             write(m_dir + QStringLiteral("/file%1.%2").arg(i, 5, 10, QLatin1Char('0')).arg(i % 2 ? "txt" : "png"));
-        DirModel model;
-        model.setPath(m_dir);
-        QCOMPARE(model.count(), 10000);
-        GroupedModel layout;
-        layout.setColumns(8);
-        layout.setSourceModel(&model);
-        QElapsedTimer timer;
-        timer.start();
-        model.setGroupBy("type");
-        const auto groupMs = timer.elapsed();
-        layout.setSourceModel(&model);
-        QCOMPARE(layout.visualIndex(9999) >= 0, true);
-        QCOMPARE(layout.fileIndexAt(layout.visualIndex(9999)), 9999);
-        timer.restart();
-        model.setGroupBy("");
-        const auto plainMs = timer.elapsed();
-        qInfo("10000 files: group %lld ms, plain %lld ms", groupMs, plainMs);
+        auto open = [this](bool grouped) {
+            DirModel model;
+            if (grouped) model.setGroupBy("type");
+            GroupedModel layout;
+            if (grouped) { layout.setColumns(8); layout.setSourceModel(&model); }
+            QElapsedTimer timer;
+            timer.start();
+            model.setPath(m_dir);
+            const auto ms = timer.elapsed();
+            if (model.count() != 10000 || (grouped && layout.fileIndexAt(layout.visualIndex(9999)) != 9999))
+                return qint64(-1);
+            return ms;
+        };
+        open(false); open(true); // прогреть файловый кэш
+        QList<qint64> plain, grouped;
+        for (int i = 0; i < 4; ++i) {
+            if (i % 2) { grouped << open(true); plain << open(false); }
+            else { plain << open(false); grouped << open(true); }
+        }
+        std::sort(plain.begin(), plain.end());
+        std::sort(grouped.begin(), grouped.end());
+        QVERIFY(plain[0] >= 0 && grouped[0] >= 0);
+        qInfo("10000 files open median: plain %lld ms, grouped %lld ms", plain[1], grouped[1]);
     }
 
     void folderViewGroupingMigration()
