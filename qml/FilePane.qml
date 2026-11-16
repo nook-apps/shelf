@@ -9,6 +9,29 @@ FocusScope {
 
     required property DirModel model
     property bool gridMode: true
+    readonly property bool grouped: model.groupBy !== ""
+    GroupedModel {
+        id: groupedModel
+        sourceModel: pane.grouped ? pane.model : null
+        columns: pane.gridMode ? Math.max(1, Math.floor((view.width - 14) / view.cellWidth)) : 1
+    }
+    function visualIndex(file) { return grouped && groupedModel.revision >= 0 ? groupedModel.visualIndex(file) : file }
+    function fileIndex(slot) { return grouped && groupedModel.revision >= 0 ? groupedModel.fileIndexAt(slot) : slot }
+    function positionFile(file, mode) { view.positionViewAtIndex(visualIndex(file), mode) }
+    function verticalTarget(file, delta) {
+        if (!grouped) return file + delta * groupedModel.columns
+        var slot = visualIndex(file), cols = groupedModel.columns
+        var column = slot % cols, row = Math.floor(slot / cols) + delta
+        while (row >= 0 && row * cols < view.count) {
+            for (var c = column; c >= 0; --c) {
+                var candidate = fileIndex(row * cols + c)
+                if (candidate >= 0) return candidate
+            }
+            row += delta > 0 ? 1 : -1
+        }
+        return delta > 0 ? model.count - 1 : 0
+    }
+
     // Сторона значка в сетке; iconShown — она же с анимацией, ею рисуются значки.
     // Миниатюры заказываем по iconSize, чтобы не дёргать кэш на каждом кадре
     property int iconSize: 56
@@ -27,7 +50,7 @@ FocusScope {
     function relayout() {
         if (cellIcon === iconSize) return
         // При масштабе держим на месте первый видимый значок
-        var anchor = view.indexAt(view.width / 2, view.contentY + 4)
+        var anchor = fileIndex(view.indexAt(view.width / 2, view.contentY + 4))
         var glide = ready && gridMode && Theme.animations
         // Где ячейки на экране сейчас — вместе с ещё не доехавшим прошлым сдвигом
         var was = {}
@@ -35,14 +58,14 @@ FocusScope {
         if (glide)
             for (var i = 0; i < cells.length; ++i)
                 if (cells[i].glideFrom && cells[i].visible)
-                    was[cells[i].index] = cells[i].mapToItem(view, 0, 0)
+                    was[cells[i].path] = cells[i].mapToItem(view, 0, 0)
         cellIcon = iconSize
         view.forceLayout()
-        if (anchor >= 0 && gridMode) view.positionViewAtIndex(anchor, GridView.Beginning)
+        if (anchor >= 0 && gridMode) positionFile(anchor, GridView.Beginning)
         if (!glide) return
         cells = view.contentItem.children
         for (var j = 0; j < cells.length; ++j)
-            if (cells[j].glideFrom) cells[j].glideFrom(was[cells[j].index])
+            if (cells[j].glideFrom) cells[j].glideFrom(was[cells[j].path])
     }
     property string renamingPath: ""
     // Окно выбора одного файла: Ctrl/Shift не добавляют к выделению
@@ -53,7 +76,19 @@ FocusScope {
     property int anchorRow: -1
     // Строка под курсором: с неё начинает первая стрелка, пока ничего не выбрано
     property int hoveredRow: -1
-    readonly property int currentRow: view.currentIndex
+    readonly property int currentRow: fileIndex(view.currentIndex)
+    property string cursorPath: ""
+    Connections {
+        target: groupedModel
+        function onRevisionChanged() {
+            if (!pane.grouped || !pane.cursorPath) return
+            Qt.callLater(function () {
+                if (!pane.grouped || !pane.cursorPath) return
+                var file = pane.model.indexOfPath(pane.cursorPath)
+                view.currentIndex = file < 0 ? -1 : pane.visualIndex(file)
+            })
+        }
+    }
     readonly property int selectedCount: Object.keys(selected).length
     // Колонка «Тип» — только когда окну хватает ширины
     readonly property bool wideList: view.width > 640
@@ -131,7 +166,8 @@ FocusScope {
         if (p) s[p] = true
         selected = s
         anchorRow = row
-        view.currentIndex = row
+        view.currentIndex = visualIndex(row)
+        cursorPath = p
     }
     function toggleRow(row) {
         if (singleSelect) { selectOnly(row); return }
@@ -140,7 +176,8 @@ FocusScope {
         if (s[p]) delete s[p]; else s[p] = true
         selected = s
         anchorRow = row
-        view.currentIndex = row
+        view.currentIndex = visualIndex(row)
+        cursorPath = p
     }
     function selectRange(row) {
         if (singleSelect) { selectOnly(row); return }
@@ -149,7 +186,8 @@ FocusScope {
         for (var i = Math.min(anchorRow, row); i <= Math.max(anchorRow, row); ++i)
             s[model.pathAt(i)] = true
         selected = s
-        view.currentIndex = row
+        view.currentIndex = visualIndex(row)
+        cursorPath = model.pathAt(row)
     }
     function selectAll() {
         var s = {}
@@ -158,7 +196,7 @@ FocusScope {
     }
     function clearSelection() { selected = ({}); anchorRow = -1 }
     // Открыли папку — ни выделения, ни курсора: первая стрелка или наведение покажут, где мы
-    function clearCurrent() { view.currentIndex = -1 }
+    function clearCurrent() { view.currentIndex = -1; cursorPath = "" }
 
     // Рамка выделения: тянуть по пустому месту. Углы — в координатах содержимого view,
     // чтобы рамка держалась за файлы при прокрутке
@@ -175,10 +213,10 @@ FocusScope {
         var c0 = Math.max(0, Math.floor(x0 / view.cellWidth)), c1 = Math.min(cols - 1, Math.floor(x1 / view.cellWidth))
         var r0 = Math.max(0, Math.floor(y0 / view.cellHeight)), r1 = Math.floor(y1 / view.cellHeight)
         var s = Object.assign({}, bandBase)
-        for (var r = r0; r <= r1 && r * cols < model.count; ++r)
+        for (var r = r0; r <= r1 && r * cols < view.count; ++r)
             for (var c = c0; c <= c1; ++c) {
-                var i = r * cols + c
-                if (i < model.count) s[model.pathAt(i)] = true
+                var i = fileIndex(r * cols + c)
+                if (i >= 0 && i < model.count) s[model.pathAt(i)] = true
             }
         selected = s
     }
@@ -194,8 +232,9 @@ FocusScope {
         selected = s
         if (first >= 0) {
             anchorRow = first
-            view.currentIndex = first
-            view.positionViewAtIndex(first, GridView.Contain)
+            view.currentIndex = visualIndex(first)
+            cursorPath = model.pathAt(first)
+            positionFile(first, GridView.Contain)
         }
         return first >= 0
     }
@@ -203,7 +242,7 @@ FocusScope {
         if (model.count === 0) { clearSelection(); return }
         row = Math.max(0, Math.min(row, model.count - 1))
         selectOnly(row)
-        view.positionViewAtIndex(row, GridView.Contain)
+        positionFile(row, GridView.Contain)
     }
     // После перечитывания папки — выкинуть исчезнувшее
     function prune() {
@@ -214,7 +253,8 @@ FocusScope {
             else changed = true
         }
         if (changed) selected = s
-        if (view.currentIndex >= model.count) view.currentIndex = model.count - 1
+        if (currentRow >= model.count) view.currentIndex = visualIndex(model.count - 1)
+        if (cursorPath && model.indexOfPath(cursorPath) < 0) cursorPath = ""
     }
     function focusView() { view.forceActiveFocus() }
     // Клик мимо поля переименования — как Enter. Сам по себе фокус не уйдёт: поле внутри
@@ -238,7 +278,7 @@ FocusScope {
             if (list.indexOf(item) < 0) list.push(item)
         }
         for (var f in byFolder) {
-            var cell = view.itemAtIndex(model.indexOfPath(f))
+            var cell = view.itemAtIndex(visualIndex(model.indexOfPath(f)))
             if (cell && cell.folder) cell.folder.spit(byFolder[f])
         }
     }
@@ -419,7 +459,7 @@ FocusScope {
         anchors.leftMargin: 8
         clip: true
         focus: true
-        model: pane.model
+        model: pane.grouped ? groupedModel : pane.model
         // Мышью не «тащим» список, как на телефоне — только колесо/тачпад
         interactive: false
         currentIndex: -1
@@ -469,13 +509,13 @@ FocusScope {
             var n = pane.model.count
             var cols = pane.gridMode ? Math.max(1, Math.floor((view.width - 14) / view.cellWidth)) : 1
             var page = Math.max(1, Math.floor(view.height / view.cellHeight)) * cols
-            var cur = view.currentIndex
+            var cur = pane.currentRow
             var target = -2
             switch (e.key) {
             case Qt.Key_Left:     if (pane.gridMode && !(e.modifiers & Qt.AltModifier)) target = cur < 0 ? 0 : cur - 1; break
             case Qt.Key_Right:    if (pane.gridMode && !(e.modifiers & Qt.AltModifier)) target = cur + 1; break
-            case Qt.Key_Up:       if (!(e.modifiers & Qt.AltModifier)) target = cur < 0 ? 0 : cur - cols; break
-            case Qt.Key_Down:     target = cur < 0 ? 0 : cur + cols; break
+            case Qt.Key_Up:       if (!(e.modifiers & Qt.AltModifier)) target = cur < 0 ? 0 : pane.verticalTarget(cur, -1); break
+            case Qt.Key_Down:     target = cur < 0 ? 0 : pane.verticalTarget(cur, 1); break
             case Qt.Key_Home:     target = 0; break
             case Qt.Key_End:      target = n - 1; break
             case Qt.Key_PageUp:   target = cur - page; break
@@ -499,17 +539,21 @@ FocusScope {
             }
             if (target === -2 || n === 0) return
             // Курсора ещё нет — первое нажатие только ставит его: на файл под мышью или на первый
-            if (cur < 0) target = pane.hoveredRow >= 0 && pane.hoveredRow < n ? pane.hoveredRow : 0
+            if (cur < 0 && e.key !== Qt.Key_Home && e.key !== Qt.Key_End) target = pane.hoveredRow >= 0 && pane.hoveredRow < n ? pane.hoveredRow : 0
             target = Math.max(0, Math.min(target, n - 1))
             if (e.modifiers & Qt.ShiftModifier) pane.selectRange(target)
             else pane.selectOnly(target)
-            view.positionViewAtIndex(target, GridView.Contain)
+            pane.positionFile(target, GridView.Contain)
             e.accepted = true
         }
 
         delegate: Item {
             id: cell
             required property int index
+            required property int fileIndex
+            required property bool isHeader
+            required property bool isPadding
+            required property string groupLabel
             required property string name
             required property string path
             required property string dir
@@ -530,10 +574,12 @@ FocusScope {
             readonly property bool searchMode: pane.model.searchQuery.length > 0
             readonly property bool dropHere: pane.dropFolder === path
             // Выбранный файл под курсором клавиатуры — его длинное имя показываем целиком
-            readonly property bool focused: selected && view.currentIndex === index && !renaming
+            readonly property bool focused: selected && pane.currentRow === fileIndex && !renaming
             // В сетке плитка вытягивается вниз под имя и ложится поверх соседей снизу
             readonly property bool tall: pane.gridMode && focused && nameLabel.implicitHeight > 40
-            z: tall ? 1 : 0
+            z: isHeader ? 2 : tall ? 1 : 0
+            enabled: fileIndex >= 0
+            visible: !isPadding
             readonly property FolderIcon folder: folderLoader.item as FolderIcon
 
             width: view.cellWidth
@@ -569,6 +615,21 @@ FocusScope {
                 target: cell; property: "appear"; from: 0; to: 1; duration: Theme.dur(200); easing.type: Easing.OutCubic
             }
 
+            Text {
+                visible: cell.isHeader
+                width: view.width - 28
+                x: 8
+                y: parent.height - height - 10
+                text: cell.groupLabel
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+            }
+            Item {
+                anchors.fill: parent
+                visible: cell.fileIndex >= 0
             // Под вытянутой плиткой — сплошной фон: плитка снизу не просвечивает сквозь имя
             Rectangle {
                 visible: cell.tall
@@ -588,7 +649,7 @@ FocusScope {
                 border.width: cell.dropHere ? 2 : 1
                 border.color: cell.dropHere ? Theme.accent : cell.selected
                     ? Theme.edge(Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, Theme.activeBorderAlpha))
-                    : (view.currentIndex === cell.index && view.activeFocus ? Theme.restBorder : "transparent")
+                    : (pane.currentRow === cell.fileIndex && view.activeFocus ? Theme.restBorder : "transparent")
                 Behavior on color { ColorAnimation { duration: 90 } }
             }
 
@@ -606,7 +667,7 @@ FocusScope {
                 // со своими слоями и эффектами), и открытие папки стоило ~3 мс на плитку
                 Loader {
                     id: folderLoader
-                    active: cell.isDir
+                    active: cell.fileIndex >= 0 && cell.isDir
                     sourceComponent: FolderIcon {
                         size: iconBox.size
                         renderSize: iconBox.renderSize
@@ -615,7 +676,7 @@ FocusScope {
                     }
                 }
                 Loader {
-                    active: !cell.isDir
+                    active: cell.fileIndex >= 0 && !cell.isDir
                     sourceComponent: Item {
                         width: iconBox.size
                         height: iconBox.size
@@ -735,14 +796,14 @@ FocusScope {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 property point pressPos
                 onContainsMouseChanged: {
-                    if (containsMouse) pane.hoveredRow = cell.index
-                    else if (pane.hoveredRow === cell.index) pane.hoveredRow = -1
+                    if (containsMouse) pane.hoveredRow = cell.fileIndex
+                    else if (pane.hoveredRow === cell.fileIndex) pane.hoveredRow = -1
                 }
                 onPressed: (m) => { if (!cell.renaming) pane.commitRename(); view.forceActiveFocus(); pressPos = Qt.point(m.x, m.y) }
                 onPositionChanged: (m) => {
                     if (!(m.buttons & Qt.LeftButton) || cell.renaming || pane.dragPaths.length > 0) return
                     if (Math.abs(m.x - pressPos.x) + Math.abs(m.y - pressPos.y) < Application.styleHints.startDragDistance) return
-                    if (!cell.selected) pane.selectOnly(cell.index)
+                    if (!cell.selected) pane.selectOnly(cell.fileIndex)
                     pane.startDrag(iconBox)
                 }
                 onClicked: (m) => {
@@ -751,16 +812,16 @@ FocusScope {
                         return
                     }
                     if (m.button === Qt.RightButton) {
-                        if (!cell.selected) pane.selectOnly(cell.index)
+                        if (!cell.selected) pane.selectOnly(cell.fileIndex)
                         var p = mapToItem(pane, m.x, m.y)
-                        pane.contextMenuRequested(cell.index, p.x, p.y)
+                        pane.contextMenuRequested(cell.fileIndex, p.x, p.y)
                         return
                     }
-                    if (m.modifiers & Qt.ControlModifier) pane.toggleRow(cell.index)
-                    else if (m.modifiers & Qt.ShiftModifier) pane.selectRange(cell.index)
-                    else pane.selectOnly(cell.index)
+                    if (m.modifiers & Qt.ControlModifier) pane.toggleRow(cell.fileIndex)
+                    else if (m.modifiers & Qt.ShiftModifier) pane.selectRange(cell.fileIndex)
+                    else pane.selectOnly(cell.fileIndex)
                 }
-                onDoubleClicked: (m) => { if (m.button === Qt.LeftButton) pane.activated(cell.index) }
+                onDoubleClicked: (m) => { if (m.button === Qt.LeftButton) pane.activated(cell.fileIndex) }
             }
 
             // На папку можно бросить файлы; подержать над ней — откроется
@@ -844,6 +905,7 @@ FocusScope {
                         onActiveFocusChanged: if (!activeFocus && pane.renamingPath === cell.path) pane.renameRequested(cell.path, text, true)
                     }
                 }
+            }
             }
         }
     }

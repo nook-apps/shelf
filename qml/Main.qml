@@ -52,11 +52,13 @@ Window {
     property bool showHidden: false
     property string sortKey: "name"
     property bool sortDesc: false
+    property string groupBy: ""
     onGridModeChanged: viewEdited()
     onIconSizeChanged: viewEdited()
     onShowHiddenChanged: tabs.forEach(function (t) { t.dir.showHidden = showHidden })
     onSortKeyChanged: viewEdited()
     onSortDescChanged: viewEdited()
+    onGroupByChanged: viewEdited()
 
     // Первая настройка показывается один раз
     Settings {
@@ -70,6 +72,9 @@ Window {
         category: "view"
         property bool gridMode: true
         property int iconSize: 56
+        property string groupBy: ""
+        property bool foldersFirst: true
+        onFoldersFirstChanged: if (win.viewReady) win.tabs.forEach(function (t) { t.dir.foldersFirst = viewDefaults.foldersFirst })
         property bool rememberFolders: true
         onRememberFoldersChanged: if (win.viewReady) win.tabs.forEach(function (t) { win.applyFolderView(t) })
         property alias showHidden: win.showHidden
@@ -82,13 +87,13 @@ Window {
     function writeTabView(t, view) {
         t.pane.gridMode = view.gridMode
         t.pane.iconSize = iconSteps.indexOf(view.iconSize) >= 0 ? view.iconSize : 56
-        t.dir.sortKey = view.sortKey
-        t.dir.sortDesc = view.sortDesc
+        t.dir.setViewSort(view.sortKey, view.sortDesc, view.groupBy || "", viewDefaults.foldersFirst)
         if (t === tab) {
             gridMode = t.pane.gridMode
             iconSize = t.pane.iconSize
             sortKey = t.dir.sortKey
             sortDesc = t.dir.sortDesc
+            groupBy = t.dir.groupBy
         }
     }
     function applyFolderView(t) {
@@ -100,7 +105,7 @@ Window {
     }
     function viewEdited() {
         if (!viewReady || applyingView || !tab) return
-        var view = { gridMode: gridMode, iconSize: iconSize, sortKey: sortKey, sortDesc: sortDesc }
+        var view = { gridMode: gridMode, iconSize: iconSize, sortKey: sortKey, sortDesc: sortDesc, groupBy: groupBy }
         applyingView = true
         writeTabView(tab, view)
         applyingView = false
@@ -112,6 +117,7 @@ Window {
             viewDefaults.iconSize = iconSize
             viewDefaults.sortKey = sortKey
             viewDefaults.sortDesc = sortDesc
+            viewDefaults.groupBy = groupBy
             tabs.forEach(function (t) { if (t !== tab) win.applyFolderView(t) })
         }
     }
@@ -645,7 +651,15 @@ Window {
     }
     function sortItems() {
         return [sortItem(qsTr("По имени"), "name"), sortItem(qsTr("По дате"), "date"),
-                sortItem(qsTr("По размеру"), "size"), sortItem(qsTr("По типу"), "type")]
+                sortItem(qsTr("По размеру"), "size"), sortItem(qsTr("По типу"), "type"),
+                sortItem(qsTr("По расширению"), "ext"), sortItem(qsTr("По дате создания"), "created")]
+    }
+    function groupItems() {
+        return [
+            { text: qsTr("Без группировки"), checked: groupBy === "", act: function () { win.groupBy = "" } },
+            { text: qsTr("Группы по типу"), checked: groupBy === "type", act: function () { win.groupBy = "type" } },
+            { text: qsTr("Группы по дате"), checked: groupBy === "date", act: function () { win.groupBy = "date" } }
+        ]
     }
     function folderMenu(x, y) {
         var undoItem = { text: FileOps.undoText ? qsTr("Отменить %1").arg(FileOps.undoText) : qsTr("Отменить"), icon: "\u{f0e2}",
@@ -663,7 +677,7 @@ Window {
             { text: qsTr("Открыть в терминале"), icon: "\u{f120}", shortcut: "F4", act: function () { FileOps.openTerminal(dir.path) } },
             { separator: true },
         ])
-        menu.show(x, y, top.concat(sortItems(), [
+        menu.show(x, y, top.concat(sortItems(), [{ separator: true }], groupItems(), [
             { text: qsTr("Сбросить вид этой папки"), enabled: !win.picking && viewDefaults.rememberFolders, act: resetFolderView },
             { separator: true },
             { text: qsTr("Скрытые файлы"), checked: dir.showHidden, icon: "\u{f070}", shortcut: "Ctrl+H",
@@ -918,11 +932,23 @@ Window {
                 TextButton {
                     text: (win.sortKey === "date" ? qsTr("По дате")
                           : win.sortKey === "size" ? qsTr("По размеру")
-                          : win.sortKey === "type" ? qsTr("По типу") : qsTr("По имени"))
+                          : win.sortKey === "type" ? qsTr("По типу")
+                          : win.sortKey === "ext" ? qsTr("По расширению")
+                          : win.sortKey === "created" ? qsTr("По дате создания") : qsTr("По имени"))
                           + (win.sortDesc ? " ↓" : " ↑")
                     onClicked: {
                         var pt = mapToItem(win.contentItem, 0, height)
                         menu.show(pt.x, pt.y, win.sortItems(), pt.y - height)
+                    }
+                }
+                GlassButton {
+                    text: "\u{f03a}"
+                    active: win.groupBy !== ""
+                    tooltip: win.groupBy === "type" ? qsTr("Группы по типу")
+                           : win.groupBy === "date" ? qsTr("Группы по дате") : qsTr("Без группировки")
+                    onClicked: {
+                        var pt = mapToItem(win.contentItem, 0, height)
+                        menu.show(pt.x, pt.y, win.groupItems(), pt.y - height)
                     }
                 }
                 GlassButton {
@@ -1332,6 +1358,8 @@ Window {
         function open() { active = true; (item as SettingsDialog).open() }
         sourceComponent: SettingsDialog {
             parent: win.contentItem
+            foldersFirst: viewDefaults.foldersFirst
+            onFoldersFirstToggled: (on) => viewDefaults.foldersFirst = on
             rememberFolders: viewDefaults.rememberFolders
             onRememberFoldersToggled: (on) => viewDefaults.rememberFolders = on
             onClosed: pane.focusView()

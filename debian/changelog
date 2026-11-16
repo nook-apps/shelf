@@ -1,3 +1,11 @@
+shelf (0.5.1) unstable; urgency=medium
+
+  * Remember folder sorting and grouping by type or date; add extension and creation date sorting.
+  * Add an option to keep folders first in the file list.
+  * Bound thumbnail caches and archive output; clean up failed picker launches.
+
+ -- Stasyao37 <kapitonov.stass@gmail.com>  Mon, 16 Nov 2026 12:00:00 +0300
+
 shelf (0.5.0) unstable; urgency=medium
 
   * Redo with Ctrl+Shift+Z or Ctrl+Y; rubber-band selection; quick look on Space.

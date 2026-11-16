@@ -33,6 +33,12 @@ DirModel::DirModel(QObject *parent)
 {
     m_collator.setNumericMode(true);
     m_collator.setCaseSensitivity(Qt::CaseInsensitive);
+    m_groupDate = QDate::currentDate();
+    m_dateTimer.setInterval(60000);
+    connect(&m_dateTimer, &QTimer::timeout, this, [this] {
+        if (m_groupBy == QLatin1String("date") && m_groupDate != QDate::currentDate()) applyFilterAndSort();
+    });
+    m_dateTimer.start();
 
     // Копирование большой папки шлёт сотни событий — перечитываем не чаще раза в 200 мс
     m_reloadTimer.setSingleShot(true);
@@ -87,6 +93,10 @@ QVariant DirModel::data(const QModelIndex &index, int role) const
     case MimeCommentRole: return e.mimeComment;
     case IconRole: return e.icon;
     case OriginRole: return e.origin;
+    case GroupIdRole: return e.group;
+    case GroupLabelRole: return m_groupBy.isEmpty() ? QString() : groupLabel(e.group);
+    case FileIndexRole: return index.row();
+    case HeaderRole: case PaddingRole: return false;
     }
     return {};
 }
@@ -101,7 +111,8 @@ QHash<int, QByteArray> DirModel::roleNames() const
         {SizeRole, "size"},         {SizeTextRole, "sizeText"},
         {DateTextRole, "dateText"}, {MimeTypeRole, "mimeType"},
         {MimeCommentRole, "mimeComment"}, {IconRole, "icon"},
-        {OriginRole, "origin"},
+        {OriginRole, "origin"}, {GroupLabelRole, "groupLabel"}, {GroupIdRole, "groupId"},
+        {FileIndexRole, "fileIndex"}, {HeaderRole, "isHeader"}, {PaddingRole, "isPadding"},
     };
 }
 
@@ -146,7 +157,9 @@ void DirModel::setPath(const QString &path)
         emit searchQueryChanged();
     }
     setError({});
+    m_settingPath = true;
     emit pathChanged();
+    m_settingPath = false;
     emit freeSpaceChanged();
     listDir();
 }
@@ -163,22 +176,18 @@ void DirModel::setShowHidden(bool on)
         startSearch();
 }
 
-void DirModel::setSortKey(const QString &key)
+void DirModel::setSortKey(const QString &key) { setViewSort(key, m_sortDesc, m_groupBy, m_foldersFirst); }
+void DirModel::setSortDesc(bool desc) { setViewSort(m_sortKey, desc, m_groupBy, m_foldersFirst); }
+void DirModel::setFoldersFirst(bool on) { setViewSort(m_sortKey, m_sortDesc, m_groupBy, on); }
+void DirModel::setGroupBy(const QString &key) { setViewSort(m_sortKey, m_sortDesc, key, m_foldersFirst); }
+void DirModel::setViewSort(const QString &key, bool desc, const QString &group, bool foldersFirst)
 {
-    if (m_sortKey == key)
-        return;
-    m_sortKey = key;
+    if (!QStringList{"name", "date", "size", "type", "ext", "created"}.contains(key)
+        || !QStringList{"", "type", "date"}.contains(group)) return;
+    if (m_sortKey == key && m_sortDesc == desc && m_groupBy == group && m_foldersFirst == foldersFirst) return;
+    m_sortKey = key; m_sortDesc = desc; m_groupBy = group; m_foldersFirst = foldersFirst;
     emit sortChanged();
-    applyFilterAndSort();
-}
-
-void DirModel::setSortDesc(bool desc)
-{
-    if (m_sortDesc == desc)
-        return;
-    m_sortDesc = desc;
-    emit sortChanged();
-    applyFilterAndSort();
+    if (!m_settingPath) applyFilterAndSort();
 }
 
 void DirModel::setSearchQuery(const QString &q)
@@ -299,7 +308,7 @@ void DirModel::applySniffed(quint64 gen, const QList<FileEntry> &batch)
         if (e.typePending)
             useSniffed(e);
     // От типа зависят фильтры окна выбора и сортировка по типу — тогда список перестраивается
-    if (!m_mimeFilters.isEmpty() || m_sortKey == QLatin1String("type")) {
+    if (!m_mimeFilters.isEmpty() || m_sortKey == QLatin1String("type") || m_groupBy == QLatin1String("type")) {
         applyFilterAndSort();
         return;
     }
@@ -317,11 +326,17 @@ void DirModel::applySniffed(quint64 gen, const QList<FileEntry> &batch)
 
 bool DirModel::lessThan(const FileEntry &a, const FileEntry &b) const
 {
-    if (a.isDir != b.isDir)
+    if (!m_groupBy.isEmpty() && a.group != b.group)
+        return m_sortDesc ? a.group > b.group : a.group < b.group;
+    if (m_foldersFirst && a.isDir != b.isDir)
         return a.isDir; // папки всегда сверху, независимо от направления
     int c = 0;
     if (m_sortKey == QLatin1String("size"))
-        c = a.isDir ? (a.childCount - b.childCount) : (a.size < b.size ? -1 : a.size > b.size ? 1 : 0);
+        c = a.isDir && b.isDir ? (a.childCount - b.childCount) : (a.size < b.size ? -1 : a.size > b.size ? 1 : 0);
+    else if (m_sortKey == QLatin1String("ext"))
+        c = QString::compare(a.extension, b.extension, Qt::CaseInsensitive);
+    else if (m_sortKey == QLatin1String("created"))
+        c = a.created < b.created ? -1 : a.created > b.created ? 1 : 0;
     else if (m_sortKey == QLatin1String("date")) {
         const QDateTime &x = a.deleted.isValid() ? a.deleted : a.mtime;
         const QDateTime &y = b.deleted.isValid() ? b.deleted : b.mtime;
@@ -335,14 +350,54 @@ bool DirModel::lessThan(const FileEntry &a, const FileEntry &b) const
     return m_sortDesc ? c > 0 : c < 0;
 }
 
+int DirModel::groupFor(const FileEntry &e, const QDate &today) const
+{
+    if (m_groupBy == QLatin1String("date")) {
+        const auto date = (e.deleted.isValid() ? e.deleted : e.mtime).toLocalTime().date();
+        if (!date.isValid()) return 5;
+        if (date > today) return 0;
+        if (date == today) return 1;
+        if (date == today.addDays(-1)) return 2;
+        if (date >= today.addDays(1 - today.dayOfWeek())) return 3;
+        return 4;
+    }
+    if (e.isDir) return 0;
+    const auto &m = e.mimeType;
+    if (m.startsWith(QLatin1String("image/"))) return 1;
+    if (m.startsWith(QLatin1String("audio/"))) return 2;
+    if (m.startsWith(QLatin1String("video/"))) return 3;
+    // Документы-контейнеры (ODF/OOXML/epub) не должны попасть в архивы.
+    if (m.startsWith(QLatin1String("text/")) || m.contains(QLatin1String("pdf"))
+        || m.contains(QLatin1String("opendocument")) || m.contains(QLatin1String("officedocument"))
+        || m.contains(QLatin1String("msword")) || m.contains(QLatin1String("ms-excel"))
+        || m.contains(QLatin1String("ms-powerpoint")) || m.contains(QLatin1String("epub"))) return 4;
+    if (m.contains(QLatin1String("zip")) || m.contains(QLatin1String("tar"))
+        || m.contains(QLatin1String("compressed")) || m.contains(QLatin1String("rar"))
+        || m.contains(QLatin1String("7z")) || m.contains(QLatin1String("zstd"))
+        || m == QLatin1String("application/x-xz")) return 5;
+    return 6;
+}
+
+QString DirModel::groupLabel(int group) const
+{
+    if (m_groupBy == QLatin1String("date")) {
+        const QStringList labels{tr("Будущие даты"), tr("Сегодня"), tr("Вчера"), tr("На этой неделе"), tr("Раньше"), tr("Без даты")};
+        return labels.value(group);
+    }
+    const QStringList labels{tr("Папки"), tr("Изображения"), tr("Аудио"), tr("Видео"), tr("Документы"), tr("Архивы"), tr("Другие файлы")};
+    return labels.value(group);
+}
+
 void DirModel::applyFilterAndSort()
 {
-    if (!m_query.isEmpty())
-        return;
+    m_groupDate = QDate::currentDate();
     QList<FileEntry> rows;
-    for (const FileEntry &e : std::as_const(m_all))
-        if ((m_showHidden || !e.isHidden) && passesFilters(e))
+    for (const FileEntry &e : std::as_const(m_all)) {
+        if ((m_showHidden || !e.isHidden) && passesFilters(e)) {
             rows.append(e);
+            if (!m_groupBy.isEmpty()) rows.last().group = groupFor(e, m_groupDate);
+        }
+    }
     std::stable_sort(rows.begin(), rows.end(),
                      [this](const FileEntry &a, const FileEntry &b) { return lessThan(a, b); });
     updateRows(rows);
@@ -423,6 +478,7 @@ void DirModel::startSearch()
     stopSearch();
     beginResetModel();
     m_rows.clear();
+    m_all.clear();
     endResetModel();
     emit countChanged();
 
@@ -488,15 +544,16 @@ void DirModel::appendResults(quint64 gen, const QList<FileEntry> &batch)
 {
     if (gen != m_searchGen)
         return;
-    QList<FileEntry> kept;
-    for (const FileEntry &e : batch)
-        if (passesFilters(e))
-            kept.append(e);
-    if (kept.isEmpty())
+    m_all.append(batch);
+    if (!m_groupBy.isEmpty()) {
+        applyFilterAndSort();
         return;
+    }
+    // Поиск приходит порциями: сохраняем порядок обхода и не сортируем весь
+    // накопленный результат при каждом обновлении.
     const int first = int(m_rows.size());
-    beginInsertRows({}, first, first + int(kept.size()) - 1);
-    m_rows.append(kept);
+    beginInsertRows({}, first, first + int(batch.size()) - 1);
+    m_rows.append(batch);
     endInsertRows();
     emit countChanged();
 }

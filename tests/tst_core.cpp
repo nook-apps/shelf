@@ -1,6 +1,7 @@
 // Модель папки и операции с файлами — без QML, на временных папках; подкраска иконок.
 // Корзина и настройки — тоже во временной папке: HOME и XDG_* подменяются до первого обращения
 #include "DirModel.h"
+#include "GroupedModel.h"
 #include "FolderViews.h"
 #include "FileOps.h"
 #include "GlassIcons.h"
@@ -8,6 +9,7 @@
 
 #include <QAbstractItemModelTester>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -74,7 +76,7 @@ private slots:
     {
         const auto file = m_home.path() + "/.local/state/shelf/folder-views.json";
         QFile::remove(file);
-        const QVariantMap view{{"sortKey", "date"}, {"sortDesc", true}, {"gridMode", false}, {"iconSize", 112}};
+        const QVariantMap view{{"sortKey", "date"}, {"sortDesc", true}, {"gridMode", false}, {"iconSize", 112}, {"groupBy", ""}};
         FolderViews store;
         QVERIFY(store.get(m_dir).isEmpty());
         QVERIFY(!QFile::exists(file)); // простое открытие не закрепляет вид
@@ -99,7 +101,7 @@ private slots:
     void folderViewsEvictionAndPruning()
     {
         const auto file = m_home.path() + "/.local/state/shelf/folder-views.json";
-        const QVariantMap view{{"sortKey", "name"}, {"sortDesc", false}, {"gridMode", true}, {"iconSize", 56}};
+        const QVariantMap view{{"sortKey", "name"}, {"sortDesc", false}, {"gridMode", true}, {"iconSize", 56}, {"groupBy", ""}};
         QJsonObject entries;
         for (int i = 0; i < FolderViews::limit; ++i) {
             const auto path = m_dir + "/" + QString::number(i);
@@ -124,6 +126,122 @@ private slots:
         QVERIFY(store.get(m_dir).isEmpty());
         QVERIFY(store.save(m_dir, view));
         QCOMPARE(store.get(m_dir), view);
+    }
+
+    void extendedSortAndGroups()
+    {
+        DirModel model;
+        FileEntry a, b;
+        a.name = "file2.TXT"; a.extension = "txt";
+        b.name = "file10.txt"; b.extension = "txt";
+        model.setSortKey("ext");
+        QVERIFY(model.lessThan(a, b));
+        a.name = "файл2.txt"; b.name = "файл10.TXT";
+        QVERIFY(model.lessThan(a, b));
+        a.extension = "ZIP"; b.extension = "txt";
+        QVERIFY(!model.lessThan(a, b));
+        model.setSortDesc(true);
+        QVERIFY(model.lessThan(a, b));
+        a.isDir = true;
+        QVERIFY(model.lessThan(a, b)); // папки сверху даже при убывании
+        model.setFoldersFirst(false);
+        model.setSortDesc(false);
+        QVERIFY(!model.lessThan(a, b));
+        a.created = QDateTime(QDate(2020,1,1), QTime(0,0));
+        b.created = a.created.addSecs(1);
+        model.setSortKey("created");
+        QVERIFY(model.lessThan(a, b));
+        model.setSortDesc(true);
+        QVERIFY(model.lessThan(b, a));
+        model.setGroupBy("date");
+        const QDate monday(2026,11,16);
+        a.mtime = QDateTime(monday, QTime(10,0)); a.deleted = {};
+        QCOMPARE(model.groupFor(a, monday), 1);
+        a.mtime = a.mtime.addDays(-1);
+        QCOMPARE(model.groupFor(a, monday), 2); // вчера важнее границы недели
+        a.mtime = QDateTime(monday, QTime(10,0));
+        QCOMPARE(model.groupFor(a, monday.addDays(3)), 3);
+        a.deleted = a.mtime.addDays(-20);
+        QCOMPARE(model.groupFor(a, monday), 4); // корзина: дата удаления
+        model.setGroupBy("type"); a.isDir = false;
+        a.mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        QCOMPARE(model.groupFor(a, monday), 4);
+        a.mimeType = "application/zip";
+        QCOMPARE(model.groupFor(a, monday), 5);
+    }
+
+    void groupedLayoutMapsOnlyFiles()
+    {
+        write(m_dir + "/a.txt"); write(m_dir + "/b.txt"); write(m_dir + "/c.png");
+        DirModel model;
+        model.setPath(m_dir);
+        model.setGroupBy("type");
+        GroupedModel layout;
+        QAbstractItemModelTester tester(&layout, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        layout.setColumns(3);
+        layout.setSourceModel(&model);
+        QCOMPARE(model.count(), 3);
+        QCOMPARE(layout.rowCount(), 11); // заголовок, картинка, добивка, заголовок, два документа
+        QCOMPARE(layout.fileIndexAt(0), -1);
+        QCOMPARE(layout.visualIndex(0), 3);
+        QCOMPARE(layout.visualIndex(1), 9);
+    }
+
+    void groupedLayoutRoundTrip()
+    {
+        for (int i=0; i<20; ++i) write(m_dir + QString("/%1.%2").arg(i).arg(i%2 ? "txt" : "png"));
+        DirModel model; model.setPath(m_dir); model.setGroupBy("type");
+        GroupedModel layout; layout.setSourceModel(&model);
+        QAbstractItemModelTester tester(&layout, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        for (int columns : {1, 3, 8}) {
+            layout.setColumns(columns);
+            for (int i=0; i<model.count(); ++i) {
+                const int slot = layout.visualIndex(i);
+                QCOMPARE(layout.fileIndexAt(slot), i);
+                QCOMPARE(layout.mapToSource(layout.index(slot,0)), model.index(i,0));
+                QCOMPARE(layout.mapFromSource(model.index(i,0)), layout.index(slot,0));
+                QCOMPARE(layout.data(layout.index(slot,0), DirModel::PathRole), model.pathAt(i));
+            }
+            model.setSortDesc(!model.sortDesc());
+        }
+        layout.setSourceModel(nullptr);
+        QCOMPARE(layout.rowCount(), 0);
+    }
+
+    void groupedLargeFolder()
+    {
+        for (int i = 0; i < 10000; ++i)
+            write(m_dir + QStringLiteral("/file%1.%2").arg(i, 5, 10, QLatin1Char('0')).arg(i % 2 ? "txt" : "png"));
+        DirModel model;
+        model.setPath(m_dir);
+        QCOMPARE(model.count(), 10000);
+        GroupedModel layout;
+        layout.setColumns(8);
+        layout.setSourceModel(&model);
+        QElapsedTimer timer;
+        timer.start();
+        model.setGroupBy("type");
+        const auto groupMs = timer.elapsed();
+        layout.setSourceModel(&model);
+        QCOMPARE(layout.visualIndex(9999) >= 0, true);
+        QCOMPARE(layout.fileIndexAt(layout.visualIndex(9999)), 9999);
+        timer.restart();
+        model.setGroupBy("");
+        const auto plainMs = timer.elapsed();
+        qInfo("10000 files: group %lld ms, plain %lld ms", groupMs, plainMs);
+    }
+
+    void folderViewGroupingMigration()
+    {
+        FolderViews store;
+        QVariantMap view{{"sortKey", "ext"}, {"sortDesc", true}, {"gridMode", true}, {"iconSize", 80}};
+        QVERIFY(store.save(m_dir, view));
+        QCOMPARE(store.get(m_dir).value("groupBy").toString(), QString());
+        view["groupBy"] = "date"; view["sortKey"] = "created";
+        QVERIFY(store.save(m_dir, view));
+        QCOMPARE(store.get(m_dir), view);
+        view["groupBy"] = "invalid";
+        QVERIFY(!store.save(m_dir, view));
     }
 
     // ── DirModel ───────────────────────────────────────────────────

@@ -24,6 +24,8 @@ class DirModel : public QAbstractListModel
     Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY showHiddenChanged)
     Q_PROPERTY(QString sortKey READ sortKey WRITE setSortKey NOTIFY sortChanged)
     Q_PROPERTY(bool sortDesc READ sortDesc WRITE setSortDesc NOTIFY sortChanged)
+    Q_PROPERTY(bool foldersFirst READ foldersFirst WRITE setFoldersFirst NOTIFY sortChanged)
+    Q_PROPERTY(QString groupBy READ groupBy WRITE setGroupBy NOTIFY sortChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(bool searching READ searching NOTIFY searchingChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -53,6 +55,11 @@ public:
         MimeCommentRole,
         IconRole,
         OriginRole,
+        GroupLabelRole,
+        GroupIdRole,
+        FileIndexRole,
+        HeaderRole,
+        PaddingRole,
     };
 
     explicit DirModel(QObject *parent = nullptr);
@@ -70,6 +77,11 @@ public:
     void setSortKey(const QString &key);
     bool sortDesc() const { return m_sortDesc; }
     void setSortDesc(bool desc);
+    bool foldersFirst() const { return m_foldersFirst; }
+    void setFoldersFirst(bool on);
+    QString groupBy() const { return m_groupBy; }
+    void setGroupBy(const QString &key);
+    Q_INVOKABLE void setViewSort(const QString &key, bool desc, const QString &group, bool foldersFirst);
     QString searchQuery() const { return m_query; }
     void setSearchQuery(const QString &q);
     bool searching() const { return m_searching; }
@@ -111,7 +123,10 @@ signals:
     void filtersChanged();
 
 private:
+    friend class TestCore;
     void listDir();
+    int groupFor(const FileEntry &entry, const QDate &today) const;
+    QString groupLabel(int group) const;
     void applyFilterAndSort();
     void refilter();
     void updateRows(const QList<FileEntry> &rows);
@@ -131,6 +146,10 @@ private:
     QString m_error;
     QString m_sortKey = QStringLiteral("name");
     bool m_sortDesc = false;
+    bool m_foldersFirst = true;
+    QString m_groupBy;
+    QDate m_groupDate;
+    QTimer m_dateTimer;
     bool m_showHidden = false;
     bool m_searching = false;
     QStringList m_nameFilters;
@@ -139,6 +158,7 @@ private:
     bool m_dirsOnly = false;
     // Сменилась папка — следующее перечитывание перестраивает список целиком
     bool m_resetNext = true;
+    bool m_settingPath = false;
 
     QList<FileEntry> m_all;   // всё содержимое папки, со скрытыми
     QList<FileEntry> m_rows;  // то, что видно

@@ -34,10 +34,12 @@ QVariantMap validated(const QVariantMap &view)
 {
     const auto sort = view.value(QStringLiteral("sortKey")).toString();
     const int size = view.value(QStringLiteral("iconSize")).toInt();
-    if (!QStringList{QStringLiteral("name"), QStringLiteral("date"), QStringLiteral("size"), QStringLiteral("type")}.contains(sort)
+    if (!QStringList{QStringLiteral("name"), QStringLiteral("date"), QStringLiteral("size"), QStringLiteral("type"), QStringLiteral("ext"), QStringLiteral("created")}.contains(sort)
         || !QList<int>{40, 56, 80, 112, 160}.contains(size)
         || !view.contains(QStringLiteral("gridMode")) || !view.contains(QStringLiteral("sortDesc"))) return {};
-    return {{QStringLiteral("sortKey"), sort}, {QStringLiteral("sortDesc"), view.value(QStringLiteral("sortDesc")).toBool()},
+    const auto group = view.value(QStringLiteral("groupBy")).toString();
+    if (!QStringList{"", "type", "date"}.contains(group)) return {};
+    return {{QStringLiteral("groupBy"), group}, {QStringLiteral("sortKey"), sort}, {QStringLiteral("sortDesc"), view.value(QStringLiteral("sortDesc")).toBool()},
             {QStringLiteral("gridMode"), view.value(QStringLiteral("gridMode")).toBool()}, {QStringLiteral("iconSize"), size}};
 }
 }

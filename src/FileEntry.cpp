@@ -89,6 +89,9 @@ FileEntry FileEntry::fromInfo(const QFileInfo &fi, const QMimeDatabase &db, bool
     const bool readable = fi.isReadable() && (!fi.isDir() || fi.isExecutable());
     e.isLocked = !readable || (!fi.isWritable() && QFileInfo(fi.absolutePath()).isWritable());
     e.mtime = fi.lastModified();
+    e.created = fi.birthTime();
+    if (!e.created.isValid()) e.created = e.mtime;
+    e.extension = fi.suffix().toCaseFolded();
     if (e.isDir) {
         e.icon = folderIcon(e.path);
         e.mimeType = QStringLiteral("inode/directory");

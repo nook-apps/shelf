@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(shelf VERSION 0.5.0 LANGUAGES CXX)
+project(shelf VERSION 0.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,7 @@ qt_add_qml_module(shelf
         fonts/ShelfIcons.ttf fonts/ShelfIconsPropo.ttf
         data/matugen/shelf-colors.json data/icons/io.github.nook_apps.Shelf.svg
     SOURCES
-        src/DirModel.h src/DirModel.cpp
+        src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp
         src/FileOps.h src/FileOps.cpp
         src/Places.h src/Places.cpp
         src/ThemeSource.h src/ThemeSource.cpp
@@ -125,7 +125,7 @@ if(SHELF_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     enable_testing()
     qt_add_executable(shelf_tests tests/tst_core.cpp
-        src/DirModel.h src/DirModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
+        src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
         src/Trash.h src/Trash.cpp src/Terminal.h src/Terminal.cpp src/Language.h src/Language.cpp
         src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp)
     qt_add_resources(shelf_tests "i18n" PREFIX "/" FILES ${I18N_FILES})
