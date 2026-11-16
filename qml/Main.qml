@@ -278,7 +278,7 @@ Window {
                 target: t.pane
                 function onActivated(row) { win.openRow(row) }
                 function onQuickLookRequested(row) { win.quickLookAt(row) }
-                function onSortRequested(key) { win.chooseSort(key) }
+                function onSortRequested(key) { win.chooseColumnSort(key) }
                 function onZoomRequested(step) { win.zoom(step) }
                 function onContextMenuRequested(row, x, y) {
                     var pt = t.pane.mapToItem(win.contentItem, x, y)
@@ -639,20 +639,47 @@ Window {
         menu.show(x, y, items)
     }
     function chooseSort(key) {
-        // Ключ и направление применяются вместе, в том числе из заголовка списка.
+        // При смене признака выбираем ожидаемый порядок; повторный выбор в меню его не меняет.
+        if (sortKey === key) return
         applyingView = true
-        sortDesc = sortKey === key ? !sortDesc : false
+        sortDesc = key === "date" || key === "created" || key === "size"
         sortKey = key
         applyingView = false
         viewEdited()
+    }
+    function chooseColumnSort(key) {
+        if (sortKey !== key) { chooseSort(key); return }
+        sortDesc = !sortDesc
+    }
+    function sortCaption() {
+        var compact = win.width - (sidebar.visible ? sidebar.width : 0) < 750
+        var title = sortKey === "date" ? qsTr("Дата")
+                  : sortKey === "created" ? qsTr("Создан")
+                  : sortKey === "size" ? qsTr("Размер")
+                  : sortKey === "type" ? qsTr("Тип")
+                  : sortKey === "ext" ? qsTr("Расширение") : qsTr("Имя")
+        var direction = sortKey === "date" || sortKey === "created"
+            ? (sortDesc ? (compact ? qsTr("новые") : qsTr("новые сначала"))
+                        : (compact ? qsTr("старые") : qsTr("старые сначала")))
+            : sortKey === "size" ? (sortDesc ? (compact ? qsTr("большие") : qsTr("большие сначала"))
+                                              : (compact ? qsTr("маленькие") : qsTr("маленькие сначала")))
+            : (sortDesc ? qsTr("Я → А") : qsTr("А → Я"))
+        return title + ": " + direction
     }
     function sortItem(label, key) {
         return { text: label, checked: dir.sortKey === key, act: function () { win.chooseSort(key) } }
     }
     function sortItems() {
-        return [sortItem(qsTr("По имени"), "name"), sortItem(qsTr("По дате"), "date"),
+        var alphabetic = sortKey === "name" || sortKey === "type" || sortKey === "ext"
+        return [{ heading: qsTr("Сортировать по") },
+                sortItem(qsTr("По имени"), "name"), sortItem(qsTr("По дате"), "date"),
                 sortItem(qsTr("По размеру"), "size"), sortItem(qsTr("По типу"), "type"),
-                sortItem(qsTr("По расширению"), "ext"), sortItem(qsTr("По дате создания"), "created")]
+                sortItem(qsTr("По расширению"), "ext"), sortItem(qsTr("По дате создания"), "created"),
+                { separator: true }, { heading: qsTr("Порядок") },
+                { text: alphabetic ? qsTr("А → Я") : sortKey === "size" ? qsTr("Сначала маленькие") : qsTr("Сначала старые"),
+                  checked: !sortDesc, act: function () { win.sortDesc = false } },
+                { text: alphabetic ? qsTr("Я → А") : sortKey === "size" ? qsTr("Сначала большие") : qsTr("Сначала новые"),
+                  checked: sortDesc, act: function () { win.sortDesc = true } }]
     }
     function groupItems() {
         return [
@@ -677,7 +704,10 @@ Window {
             { text: qsTr("Открыть в терминале"), icon: "\u{f120}", shortcut: "F4", act: function () { FileOps.openTerminal(dir.path) } },
             { separator: true },
         ])
-        menu.show(x, y, top.concat(sortItems(), [{ separator: true }], groupItems(), [
+        menu.show(x, y, top.concat([
+            { text: qsTr("Сортировка…"), act: function () { menu.show(x, y, win.sortItems()) } },
+            { separator: true }
+        ], groupItems(), [
             { text: qsTr("Сбросить вид этой папки"), enabled: !win.picking && viewDefaults.rememberFolders, act: resetFolderView },
             { separator: true },
             { text: qsTr("Скрытые файлы"), checked: dir.showHidden, icon: "\u{f070}", shortcut: "Ctrl+H",
@@ -860,8 +890,9 @@ Window {
                 Rectangle {
                     // В узком (тайловом) окне поиск уступает место пути. Ширину считаем от окна:
                     // от ширины самой панели нельзя — она зависит от этого же поля, и Layout зацикливается
-                    Layout.preferredWidth: Math.min(searchField.activeFocus || searchField.text ? 260 : 190,
-                                                    Math.max(120, (win.width - (sidebar.visible ? sidebar.width : 0) - 16) * 0.3))
+                    Layout.preferredWidth: win.width - (sidebar.visible ? sidebar.width : 0) < 750 ? 120
+                        : Math.min(searchField.activeFocus || searchField.text ? 260 : 190,
+                                   Math.max(120, (win.width - (sidebar.visible ? sidebar.width : 0) - 16) * 0.3))
                     Layout.preferredHeight: 32
                     radius: Theme.btnRadius(height, false, Theme.widgetRadius)
                     color: Theme.material ? Theme.surface0 : Theme.ink(0.04)
@@ -930,19 +961,15 @@ Window {
                 }
 
                 TextButton {
-                    text: (win.sortKey === "date" ? qsTr("По дате")
-                          : win.sortKey === "size" ? qsTr("По размеру")
-                          : win.sortKey === "type" ? qsTr("По типу")
-                          : win.sortKey === "ext" ? qsTr("По расширению")
-                          : win.sortKey === "created" ? qsTr("По дате создания") : qsTr("По имени"))
-                          + (win.sortDesc ? " ↓" : " ↑")
+                    Layout.maximumWidth: win.width - (sidebar.visible ? sidebar.width : 0) < 750 ? 165 : 220
+                    text: win.sortCaption()
                     onClicked: {
                         var pt = mapToItem(win.contentItem, 0, height)
                         menu.show(pt.x, pt.y, win.sortItems(), pt.y - height)
                     }
                 }
                 GlassButton {
-                    text: "\u{f03a}"
+                    text: "\u{f1b2}"
                     active: win.groupBy !== ""
                     tooltip: win.groupBy === "type" ? qsTr("Группы по типу")
                            : win.groupBy === "date" ? qsTr("Группы по дате") : qsTr("Без группировки")
@@ -953,8 +980,8 @@ Window {
                 }
                 GlassButton {
                     Layout.leftMargin: 4
-                    text: pane.gridMode ? "\u{f03a}" : "\u{f00a}"
-                    tooltip: pane.gridMode ? qsTr("Списком (Ctrl+2)") : qsTr("Значками (Ctrl+1)")
+                    text: pane.gridMode ? "\u{f0db}" : "\u{f03a}"
+                    tooltip: pane.gridMode ? qsTr("Значки") : qsTr("Список")
                     onClicked: win.gridMode = !win.gridMode
                 }
                 GlassButton {

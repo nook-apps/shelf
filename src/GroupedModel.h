@@ -10,11 +10,14 @@ class GroupedModel : public QAbstractProxyModel
     QML_ELEMENT
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
     Q_PROPERTY(int columns READ columns WRITE setColumns NOTIFY columnsChanged)
+    Q_PROPERTY(int rowSpan READ rowSpan WRITE setRowSpan NOTIFY rowSpanChanged)
 public:
     explicit GroupedModel(QObject *parent = nullptr) : QAbstractProxyModel(parent) {}
     int revision() const { return m_revision; }
     int columns() const { return m_columns; }
     void setColumns(int columns);
+    int rowSpan() const { return m_rowSpan; }
+    void setRowSpan(int rows);
     void setSourceModel(QAbstractItemModel *source) override;
     QModelIndex mapToSource(const QModelIndex &index) const override;
     QModelIndex mapFromSource(const QModelIndex &index) const override;
@@ -26,14 +29,17 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     Q_INVOKABLE int visualIndex(int fileIndex) const { return m_visual.value(fileIndex, -1); }
     Q_INVOKABLE int fileIndexAt(int visualIndex) const;
+    Q_INVOKABLE int coveredFileAt(int visualIndex) const;
 signals:
     void columnsChanged();
+    void rowSpanChanged();
     void revisionChanged();
 private:
     void rebuild();
-    struct Slot { int file = -1; QString label; };
+    struct Slot { int file = -1; int covered = -1; QString label; };
     int m_revision = 0;
     int m_columns = 1;
+    int m_rowSpan = 1;
     QVector<Slot> m_slots;
     QVector<int> m_visual;
     QList<QMetaObject::Connection> m_connections;

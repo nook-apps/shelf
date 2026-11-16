@@ -14,10 +14,19 @@ FocusScope {
         id: groupedModel
         sourceModel: pane.grouped ? pane.model : null
         columns: pane.gridMode ? Math.max(1, Math.floor((view.width - 14) / view.cellWidth)) : 1
+        rowSpan: pane.gridMode ? Math.ceil((pane.cellIcon + 62) / 40) : 1
     }
     function visualIndex(file) { return grouped && groupedModel.revision >= 0 ? groupedModel.visualIndex(file) : file }
     function fileIndex(slot) { return grouped && groupedModel.revision >= 0 ? groupedModel.fileIndexAt(slot) : slot }
-    function positionFile(file, mode) { view.positionViewAtIndex(visualIndex(file), mode) }
+    function positionFile(file, mode) {
+        var slot = visualIndex(file)
+        view.positionViewAtIndex(slot, mode)
+        if (grouped && gridMode && mode === GridView.Contain && slot >= 0) {
+            var bottom = Math.floor(slot / groupedModel.columns) * view.cellHeight + cellIcon + 62
+            if (bottom > view.contentY + view.height)
+                view.contentY = bottom - view.height
+        }
+    }
     function verticalTarget(file, delta) {
         if (!grouped) return file + delta * groupedModel.columns
         var slot = visualIndex(file), cols = groupedModel.columns
@@ -50,7 +59,8 @@ FocusScope {
     function relayout() {
         if (cellIcon === iconSize) return
         // При масштабе держим на месте первый видимый значок
-        var anchor = fileIndex(view.indexAt(view.width / 2, view.contentY + 4))
+        var slot = view.indexAt(view.width / 2, view.contentY + 4)
+        var anchor = grouped && gridMode ? groupedModel.coveredFileAt(slot) : fileIndex(slot)
         var glide = ready && gridMode && Theme.animations
         // Где ячейки на экране сейчас — вместе с ещё не доехавшим прошлым сдвигом
         var was = {}
@@ -107,6 +117,11 @@ FocusScope {
     // ── Перетаскивание ───────────────────────────────────────────────
     property var dragPaths: []
     property string dropFolder: ""   // папка под курсором, куда упадут файлы
+    onGroupedChanged: dropFolder = ""
+    Connections {
+        target: pane.model
+        function onPathChanged() { pane.dropFolder = "" }
+    }
     readonly property bool dropBlocked: model.path.startsWith(Places.trashPath + "/")
 
     function startDrag(iconItem) {
@@ -215,7 +230,8 @@ FocusScope {
         var s = Object.assign({}, bandBase)
         for (var r = r0; r <= r1 && r * cols < view.count; ++r)
             for (var c = c0; c <= c1; ++c) {
-                var i = fileIndex(r * cols + c)
+                var slot = r * cols + c
+                var i = grouped && gridMode ? groupedModel.coveredFileAt(slot) : fileIndex(slot)
                 if (i >= 0 && i < model.count) s[model.pathAt(i)] = true
             }
         selected = s
@@ -474,7 +490,8 @@ FocusScope {
         cellWidth: pane.gridMode
             ? Math.floor((width - 14) / Math.max(1, Math.floor((width - 14) / gridCell)))
             : width - 14
-        cellHeight: pane.gridMode ? pane.cellIcon + 62 : 30
+        cellHeight: pane.gridMode ? (pane.grouped ? 40 : pane.cellIcon + 62) : 30
+        cacheBuffer: pane.grouped && pane.gridMode ? pane.cellIcon + 62 : 0
 
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
@@ -508,7 +525,7 @@ FocusScope {
         Keys.onPressed: (e) => {
             var n = pane.model.count
             var cols = pane.gridMode ? Math.max(1, Math.floor((view.width - 14) / view.cellWidth)) : 1
-            var page = Math.max(1, Math.floor(view.height / view.cellHeight)) * cols
+            var page = Math.max(1, Math.floor(view.height / (pane.gridMode ? pane.cellIcon + 62 : view.cellHeight))) * cols
             var cur = pane.currentRow
             var target = -2
             switch (e.key) {
@@ -583,7 +600,7 @@ FocusScope {
             readonly property FolderIcon folder: folderLoader.item as FolderIcon
 
             width: view.cellWidth
-            height: view.cellHeight
+            height: cell.fileIndex >= 0 && pane.gridMode && pane.grouped ? pane.cellIcon + 62 : view.cellHeight
             // appear — для анимаций появления и удаления; у скрытых файлов своя полупрозрачность
             property real appear: 1
             opacity: (isHidden ? 0.6 : 1.0) * appear
@@ -826,6 +843,7 @@ FocusScope {
 
             // На папку можно бросить файлы; подержать над ней — откроется
             DropArea {
+                id: folderDrop
                 anchors.fill: parent
                 enabled: cell.isDir
                 onEntered: (drag) => {
@@ -839,8 +857,12 @@ FocusScope {
                 }
                 Timer {
                     interval: 900
-                    running: cell.dropHere
-                    onTriggered: { pane.dropFolder = ""; pane.springOpen(cell.path) }
+                    running: cell.dropHere && folderDrop.containsDrag
+                    onTriggered: {
+                        if (!cell.dropHere || !folderDrop.containsDrag) return
+                        pane.dropFolder = ""
+                        pane.springOpen(cell.path)
+                    }
                 }
             }
 

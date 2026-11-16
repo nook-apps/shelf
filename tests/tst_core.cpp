@@ -181,7 +181,7 @@ private slots:
         layout.setColumns(3);
         layout.setSourceModel(&model);
         QCOMPARE(model.count(), 3);
-        QCOMPARE(layout.rowCount(), 11); // заголовок, картинка, добивка, заголовок, два документа
+        QCOMPARE(layout.rowCount(), 12); // строки файлов дополнены до полной ширины
         QCOMPARE(layout.fileIndexAt(0), -1);
         QCOMPARE(layout.visualIndex(0), 3);
         QCOMPARE(layout.visualIndex(1), 9);
@@ -191,19 +191,25 @@ private slots:
     {
         for (int i=0; i<20; ++i) write(m_dir + QString("/%1.%2").arg(i).arg(i%2 ? "txt" : "png"));
         DirModel model; model.setPath(m_dir); model.setGroupBy("type");
-        GroupedModel layout; layout.setSourceModel(&model);
+        GroupedModel layout;
+        QCOMPARE(layout.roleNames(), model.roleNames()); // QML может назначить прокси до sourceModel
+        layout.setSourceModel(&model);
         QAbstractItemModelTester tester(&layout, QAbstractItemModelTester::FailureReportingMode::QtTest);
         for (int columns : {1, 3, 8}) {
             layout.setColumns(columns);
+            layout.setRowSpan(3);
             for (int i=0; i<model.count(); ++i) {
                 const int slot = layout.visualIndex(i);
                 QCOMPARE(layout.fileIndexAt(slot), i);
+                QCOMPARE(layout.fileIndexAt(slot + columns), -1);
+                QCOMPARE(layout.coveredFileAt(slot + columns), i);
                 QCOMPARE(layout.mapToSource(layout.index(slot,0)), model.index(i,0));
                 QCOMPARE(layout.mapFromSource(model.index(i,0)), layout.index(slot,0));
                 QCOMPARE(layout.data(layout.index(slot,0), DirModel::PathRole), model.pathAt(i));
             }
             model.setSortDesc(!model.sortDesc());
         }
+        layout.setRowSpan(1);
         layout.setSourceModel(nullptr);
         QCOMPARE(layout.rowCount(), 0);
     }
@@ -216,7 +222,7 @@ private slots:
             DirModel model;
             if (grouped) model.setGroupBy("type");
             GroupedModel layout;
-            if (grouped) { layout.setColumns(8); layout.setSourceModel(&model); }
+            if (grouped) { layout.setColumns(8); layout.setRowSpan(3); layout.setSourceModel(&model); }
             QElapsedTimer timer;
             timer.start();
             model.setPath(m_dir);
