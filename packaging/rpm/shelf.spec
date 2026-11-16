@@ -1,5 +1,5 @@
 Name:           shelf
-Version:        0.5.1
+Version:        0.5.2
 Release:        1%{?dist}
 Summary:        Glass file manager for Hyprland in Qt 6 / QML
 
@@ -65,6 +65,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.S
 %{_datadir}/xdg-desktop-portal/portals/shelf.portal
 
 %changelog
+* Tue Nov 17 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.2-1
+- Clearer sort controls and grouping icons; compact grouped grid
+- Fix grouped folder navigation and delayed spring-open after grouping
 * Mon Nov 16 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.1-1
 - Per-folder sorting by extension or creation date and grouping by type or date
 - Option to show folders first; resource usage fixes for thumbnails, archive output and picker

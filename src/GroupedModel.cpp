@@ -9,6 +9,14 @@ void GroupedModel::setColumns(int columns)
     rebuild();
     emit columnsChanged();
 }
+void GroupedModel::setRowSpan(int rows)
+{
+    rows = qMax(1, rows);
+    if (m_rowSpan == rows) return;
+    m_rowSpan = rows;
+    rebuild();
+    emit rowSpanChanged();
+}
 void GroupedModel::setSourceModel(QAbstractItemModel *source)
 {
     if (source == sourceModel()) { if (!source) rebuild(); return; }
@@ -32,24 +40,40 @@ void GroupedModel::rebuild()
     if (sourceModel()) {
         m_visual.resize(sourceModel()->rowCount());
         int previous = -1;
+        int inRow = 0;
+        QVector<int> rowFiles;
+        rowFiles.reserve(m_columns);
+        auto finishRow = [&] {
+            if (inRow == 0) return;
+            while (rowFiles.size() < m_columns) rowFiles.append(-1);
+            while (m_slots.size() % m_columns) m_slots.append(Slot{});
+            for (int r = 1; r < m_rowSpan; ++r)
+                for (int file : std::as_const(rowFiles)) m_slots.append(Slot{-1, file, {}});
+            inRow = 0;
+            rowFiles.clear();
+        };
         for (int i = 0; i < sourceModel()->rowCount(); ++i) {
             const int group = sourceModel()->data(sourceModel()->index(i, 0), DirModel::GroupIdRole).toInt();
             if (i == 0 || group != previous) {
+                finishRow();
                 const auto label = sourceModel()->data(sourceModel()->index(i, 0), DirModel::GroupLabelRole).toString();
-                while (m_slots.size() % m_columns) m_slots.append(Slot{});
-                m_slots.append(Slot{-1, label});
+                m_slots.append(Slot{-1, -1, label});
                 for (int c = 1; c < m_columns; ++c) m_slots.append(Slot{});
                 previous = group;
             }
             m_visual[i] = int(m_slots.size());
-            m_slots.append(Slot{i, {}});
+            m_slots.append(Slot{i, i, {}});
+            rowFiles.append(i);
+            if (++inRow == m_columns) finishRow();
         }
+        finishRow();
     }
     endResetModel();
     ++m_revision;
     emit revisionChanged();
 }
 int GroupedModel::fileIndexAt(int i) const { return i >= 0 && i < m_slots.size() ? m_slots[i].file : -1; }
+int GroupedModel::coveredFileAt(int i) const { return i >= 0 && i < m_slots.size() ? m_slots[i].covered : -1; }
 QModelIndex GroupedModel::index(int row, int column, const QModelIndex &parent) const
 {
     return !parent.isValid() && column == 0 && row >= 0 && row < m_slots.size() ? createIndex(row, column) : QModelIndex();
@@ -63,7 +87,7 @@ QModelIndex GroupedModel::mapFromSource(const QModelIndex &i) const
 {
     return i.isValid() && i.model() == sourceModel() ? index(visualIndex(i.row()), 0) : QModelIndex();
 }
-QHash<int, QByteArray> GroupedModel::roleNames() const { return sourceModel() ? sourceModel()->roleNames() : QHash<int, QByteArray>{}; }
+QHash<int, QByteArray> GroupedModel::roleNames() const { return DirModel::fileRoleNames(); }
 QVariant GroupedModel::data(const QModelIndex &i, int role) const
 {
     if (!i.isValid() || i.row() >= m_slots.size()) return {};

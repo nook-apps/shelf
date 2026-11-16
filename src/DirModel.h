@@ -68,6 +68,7 @@ public:
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
+    static QHash<int, QByteArray> fileRoleNames();
 
     QString path() const { return m_path; }
     void setPath(const QString &path);

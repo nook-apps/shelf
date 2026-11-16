@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import Shelf
 
-// Меню по ПКМ. Пункты: { text, icon, shortcut, enabled, checked, act } или { separator: true }
+// Меню по ПКМ. Пункты: { text, icon, shortcut, enabled, checked, act },
+// { heading: "…" } или { separator: true }.
 Popup {
     id: menu
 
@@ -12,7 +13,8 @@ Popup {
     // у него ещё размер прошлого меню
     function heightOf(list) {
         var h = topPadding + bottomPadding
-        for (var i = 0; i < list.length; ++i) h += list[i].separator === true ? 9 : 32
+        for (var i = 0; i < list.length; ++i)
+            h += list[i].separator === true ? 9 : list[i].heading ? 24 : 32
         return h
     }
     // aboveY — для меню у кнопки: не влезает ниже — раскрыться над этой точкой (верх кнопки),
@@ -60,9 +62,10 @@ Popup {
                 id: entry
                 required property var modelData
                 readonly property bool sep: modelData.separator === true
+                readonly property bool heading: !!modelData.heading
                 readonly property bool on: modelData.enabled !== false
                 width: menu.availableWidth
-                height: sep ? 9 : 32
+                height: sep ? 9 : heading ? 24 : 32
 
                 Rectangle {
                     visible: entry.sep
@@ -71,14 +74,14 @@ Popup {
                     color: Theme.restBorder.a > 0 ? Theme.restBorder : Theme.surface2
                 }
                 Rectangle {
-                    visible: !entry.sep
+                    visible: !entry.sep && !entry.heading
                     anchors.fill: parent
                     radius: Theme.btnRadius(height, false, 6)
                     color: ma.containsMouse && entry.on ? Theme.hoverFill : "transparent"
                 }
                 Text {
                     id: ic
-                    visible: !entry.sep
+                    visible: !entry.sep && !entry.heading
                     x: 10; width: 20
                     anchors.verticalCenter: parent.verticalCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -89,7 +92,7 @@ Popup {
                     opacity: entry.on ? 1 : 0.4
                 }
                 Text {
-                    visible: !entry.sep
+                    visible: !entry.sep && !entry.heading
                     anchors { left: ic.right; leftMargin: 10; right: sc.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
                     text: entry.modelData.text || ""
                     elide: Text.ElideRight
@@ -99,8 +102,17 @@ Popup {
                     opacity: entry.on ? 1 : 0.4
                 }
                 Text {
+                    visible: entry.heading
+                    anchors { left: parent.left; leftMargin: 12; bottom: parent.bottom; bottomMargin: 4 }
+                    text: entry.modelData.heading || ""
+                    color: Theme.subtext0
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize - 3
+                    font.weight: Font.DemiBold
+                }
+                Text {
                     id: sc
-                    visible: !entry.sep
+                    visible: !entry.sep && !entry.heading
                     anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
                     text: entry.modelData.shortcut || ""
                     color: Theme.overlay1
@@ -111,7 +123,7 @@ Popup {
                     id: ma
                     anchors.fill: parent
                     hoverEnabled: true
-                    enabled: !entry.sep && entry.on
+                    enabled: !entry.sep && !entry.heading && entry.on
                     onClicked: {
                         menu.close()
                         entry.modelData.act()

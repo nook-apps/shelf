@@ -36,6 +36,9 @@ Item {
     Text {
         id: label
         anchors.centerIn: parent
+        width: Math.min(implicitWidth, Math.max(0, root.width - 20))
+        elide: Text.ElideRight
+        horizontalAlignment: Text.AlignHCenter
         text: root.text
         color: (root.primary || root.danger) ? Theme.activeFg(root.tone) : Theme.text
         font.family: Theme.fontFamily

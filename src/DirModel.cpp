@@ -101,7 +101,9 @@ QVariant DirModel::data(const QModelIndex &index, int role) const
     return {};
 }
 
-QHash<int, QByteArray> DirModel::roleNames() const
+QHash<int, QByteArray> DirModel::roleNames() const { return fileRoleNames(); }
+
+QHash<int, QByteArray> DirModel::fileRoleNames()
 {
     return {
         {NameRole, "name"},         {PathRole, "path"},
