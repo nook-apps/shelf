@@ -1,5 +1,5 @@
 Name:           shelf
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Glass file manager for Hyprland in Qt 6 / QML
 
@@ -65,6 +65,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.S
 %{_datadir}/xdg-desktop-portal/portals/shelf.portal
 
 %changelog
+* Mon Nov 16 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.1-1
+- Per-folder sorting by extension or creation date and grouping by type or date
+- Option to show folders first; resource usage fixes for thumbnails, archive output and picker
 * Sat Nov 07 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.0-1
 - Redo with Ctrl+Shift+Z or Ctrl+Y; rubber-band selection; quick look on Space
 - Extract and compress archives from the file menu

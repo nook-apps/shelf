@@ -10,6 +10,8 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
+#include <memory>
+#include <utility>
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QUrl>
@@ -247,7 +249,9 @@ void FileChooser::start(const QString &mode, const QDBusObjectPath &handle, cons
     ++m_running;
     emit busy();
     const FilterList sent = filters;
-    connect(proc, &QProcess::finished, this, [this, proc, reqFile, message, handle, sent](int code, QProcess::ExitStatus st) {
+    const auto completed = std::make_shared<bool>(false);
+    const auto finish = [this, proc, reqFile, message, handle, sent, completed](int code, QProcess::ExitStatus st) {
+        if (std::exchange(*completed, true)) return;
         QDBusConnection::sessionBus().unregisterObject(handle.path());
         uint response = 1;
         QVariantMap results;
@@ -277,10 +281,12 @@ void FileChooser::start(const QString &mode, const QDBusObjectPath &handle, cons
         proc->deleteLater();
         if (--m_running == 0)
             emit idle();
+    };
+    connect(proc, &QProcess::finished, this, finish);
+    connect(proc, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) finish(2, QProcess::CrashExit);
     });
     proc->start(exe, {QStringLiteral("--pick"), reqFile->fileName()});
-    if (!proc->waitForStarted(5000))
-        proc->kill(); // finished придёт с кодом ошибки — ответим 2
 }
 
 #include "FileChooser.moc"

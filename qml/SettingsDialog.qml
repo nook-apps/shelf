@@ -9,6 +9,10 @@ import Shelf
 GlassDialog {
     id: dlg
 
+    property bool foldersFirst: true
+    signal foldersFirstToggled(bool on)
+    property bool rememberFolders: true
+    signal rememberFoldersToggled(bool on)
     signal firstRunRequested()
     // Сообщение в тост главного окна
     signal message(string text)
@@ -249,6 +253,44 @@ GlassDialog {
                 }
 
                 SectionTitle { text: qsTr("ПРОВОДНИК") }
+                Item {
+                    width: parent.width
+                    height: 38
+                    Text {
+                        x: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Папки сверху")
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize - 1
+                    }
+                    ToggleSwitch {
+                        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                        checked: dlg.foldersFirst
+                        onToggled: (on) => dlg.foldersFirstToggled(on)
+                    }
+                }
+                Item {
+                    width: parent.width
+                    height: Math.max(38, rememberLabel.implicitHeight + 16)
+                    Text {
+                        id: rememberLabel
+                        x: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - 80
+                        text: qsTr("Запоминать вид для каждой папки")
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize - 1
+                        wrapMode: Text.Wrap
+                    }
+                    ToggleSwitch {
+                        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                        checked: dlg.rememberFolders
+                        onToggled: (on) => dlg.rememberFoldersToggled(on)
+                    }
+                }
+
                 Item {
                     width: parent.width
                     height: 38

@@ -34,7 +34,7 @@ Window {
     readonly property DirModel dir: tab ? tab.dir : stubDir
     readonly property FilePane pane: tab ? tab.pane : stubPane
 
-    // Вид общий для всех вкладок и запоминается между запусками
+    // Текущий вид; общие значения по умолчанию хранятся отдельно
     property bool gridMode: true
     // Размер значков в сетке — один из iconSteps (Ctrl+колесо, Ctrl+= / Ctrl+- / Ctrl+0)
     readonly property var iconSteps: [40, 56, 80, 112, 160]
@@ -52,11 +52,13 @@ Window {
     property bool showHidden: false
     property string sortKey: "name"
     property bool sortDesc: false
-    onGridModeChanged: tabs.forEach(function (t) { t.pane.gridMode = gridMode })
-    onIconSizeChanged: tabs.forEach(function (t) { t.pane.iconSize = iconSize })
+    property string groupBy: ""
+    onGridModeChanged: viewEdited()
+    onIconSizeChanged: viewEdited()
     onShowHiddenChanged: tabs.forEach(function (t) { t.dir.showHidden = showHidden })
-    onSortKeyChanged: tabs.forEach(function (t) { t.dir.sortKey = sortKey })
-    onSortDescChanged: tabs.forEach(function (t) { t.dir.sortDesc = sortDesc })
+    onSortKeyChanged: viewEdited()
+    onSortDescChanged: viewEdited()
+    onGroupByChanged: viewEdited()
 
     // Первая настройка показывается один раз
     Settings {
@@ -66,12 +68,63 @@ Window {
     }
 
     Settings {
+        id: viewDefaults
         category: "view"
-        property alias gridMode: win.gridMode
-        property alias iconSize: win.iconSize
+        property bool gridMode: true
+        property int iconSize: 56
+        property string groupBy: ""
+        property bool foldersFirst: true
+        onFoldersFirstChanged: if (win.viewReady) win.tabs.forEach(function (t) { t.dir.foldersFirst = viewDefaults.foldersFirst })
+        property bool rememberFolders: true
+        onRememberFoldersChanged: if (win.viewReady) win.tabs.forEach(function (t) { win.applyFolderView(t) })
         property alias showHidden: win.showHidden
-        property alias sortKey: win.sortKey
-        property alias sortDesc: win.sortDesc
+        property string sortKey: "name"
+        property bool sortDesc: false
+    }
+
+    property bool viewReady: false
+    property bool applyingView: false
+    function writeTabView(t, view) {
+        t.pane.gridMode = view.gridMode
+        t.pane.iconSize = iconSteps.indexOf(view.iconSize) >= 0 ? view.iconSize : 56
+        t.dir.setViewSort(view.sortKey, view.sortDesc, view.groupBy || "", viewDefaults.foldersFirst)
+        if (t === tab) {
+            gridMode = t.pane.gridMode
+            iconSize = t.pane.iconSize
+            sortKey = t.dir.sortKey
+            sortDesc = t.dir.sortDesc
+            groupBy = t.dir.groupBy
+        }
+    }
+    function applyFolderView(t) {
+        if (!viewReady || !t) return
+        applyingView = true
+        var saved = viewDefaults.rememberFolders ? FolderViews.get(t.dir.path) : {}
+        writeTabView(t, saved.sortKey !== undefined ? saved : viewDefaults)
+        applyingView = false
+    }
+    function viewEdited() {
+        if (!viewReady || applyingView || !tab) return
+        var view = { gridMode: gridMode, iconSize: iconSize, sortKey: sortKey, sortDesc: sortDesc, groupBy: groupBy }
+        applyingView = true
+        writeTabView(tab, view)
+        applyingView = false
+        if (picking) return
+        if (viewDefaults.rememberFolders) {
+            if (!FolderViews.save(dir.path, view)) toast(qsTr("Не удалось сохранить вид папки"))
+        } else {
+            viewDefaults.gridMode = gridMode
+            viewDefaults.iconSize = iconSize
+            viewDefaults.sortKey = sortKey
+            viewDefaults.sortDesc = sortDesc
+            viewDefaults.groupBy = groupBy
+            tabs.forEach(function (t) { if (t !== tab) win.applyFolderView(t) })
+        }
+    }
+    function resetFolderView() {
+        if (picking) return
+        if (!FolderViews.reset(dir.path)) { toast(qsTr("Не удалось сохранить вид папки")); return }
+        tabs.forEach(function (t) { win.applyFolderView(t) })
     }
 
     // ── Сессия ───────────────────────────────────────────────────────
@@ -213,18 +266,19 @@ Window {
                 t.dir.showHidden = win.showHidden
                 t.dir.sortKey = win.sortKey
                 t.dir.sortDesc = win.sortDesc
+                win.applyFolderView(t)
                 t.pane.ready = true
             }
-            // Сортировку меняют и щелчком по заголовку колонки — запоминаем для всех вкладок
+            // Программная смена вида не создаёт запись для папки.
             Connections {
                 target: t.dir
-                function onSortChanged() { win.sortKey = t.dir.sortKey; win.sortDesc = t.dir.sortDesc }
-                function onPathChanged() { win.saveSession() }
+                function onPathChanged() { win.applyFolderView(t); win.saveSession() }
             }
             Connections {
                 target: t.pane
                 function onActivated(row) { win.openRow(row) }
                 function onQuickLookRequested(row) { win.quickLookAt(row) }
+                function onSortRequested(key) { win.chooseSort(key) }
                 function onZoomRequested(step) { win.zoom(step) }
                 function onContextMenuRequested(row, x, y) {
                     var pt = t.pane.mapToItem(win.contentItem, x, y)
@@ -333,6 +387,7 @@ Window {
         searchDebounce.stop()
         pathBar.editing = false
         tab = tabs[i]
+        applyFolderView(tab)
         // У поля поиска одно на окно — показываем запрос этой вкладки
         searchField.text = dir.searchQuery
         searchDebounce.stop()
@@ -583,13 +638,30 @@ Window {
         items.push({ text: qsTr("Свойства"), icon: "\u{f05a}", shortcut: "Alt+Enter", enabled: single, act: showProperties })
         menu.show(x, y, items)
     }
+    function chooseSort(key) {
+        // Ключ и направление применяются вместе, в том числе из заголовка списка.
+        applyingView = true
+        sortDesc = sortKey === key ? !sortDesc : false
+        sortKey = key
+        applyingView = false
+        viewEdited()
+    }
+    function sortItem(label, key) {
+        return { text: label, checked: dir.sortKey === key, act: function () { win.chooseSort(key) } }
+    }
+    function sortItems() {
+        return [sortItem(qsTr("По имени"), "name"), sortItem(qsTr("По дате"), "date"),
+                sortItem(qsTr("По размеру"), "size"), sortItem(qsTr("По типу"), "type"),
+                sortItem(qsTr("По расширению"), "ext"), sortItem(qsTr("По дате создания"), "created")]
+    }
+    function groupItems() {
+        return [
+            { text: qsTr("Без группировки"), checked: groupBy === "", act: function () { win.groupBy = "" } },
+            { text: qsTr("Группы по типу"), checked: groupBy === "type", act: function () { win.groupBy = "type" } },
+            { text: qsTr("Группы по дате"), checked: groupBy === "date", act: function () { win.groupBy = "date" } }
+        ]
+    }
     function folderMenu(x, y) {
-        function sortItem(label, key) {
-            return { text: label, checked: dir.sortKey === key, act: function () {
-                if (win.sortKey === key) win.sortDesc = !win.sortDesc
-                else { win.sortKey = key; win.sortDesc = false }
-            } }
-        }
         var undoItem = { text: FileOps.undoText ? qsTr("Отменить %1").arg(FileOps.undoText) : qsTr("Отменить"), icon: "\u{f0e2}",
                          shortcut: "Ctrl+Z", enabled: FileOps.undoText !== "" && !FileOps.busy, act: undo }
         // «Повторить» — только когда есть что: обычно отменённого нет
@@ -605,8 +677,8 @@ Window {
             { text: qsTr("Открыть в терминале"), icon: "\u{f120}", shortcut: "F4", act: function () { FileOps.openTerminal(dir.path) } },
             { separator: true },
         ])
-        menu.show(x, y, top.concat([
-            sortItem(qsTr("По имени"), "name"), sortItem(qsTr("По дате"), "date"), sortItem(qsTr("По размеру"), "size"), sortItem(qsTr("По типу"), "type"),
+        menu.show(x, y, top.concat(sortItems(), [{ separator: true }], groupItems(), [
+            { text: qsTr("Сбросить вид этой папки"), enabled: !win.picking && viewDefaults.rememberFolders, act: resetFolderView },
             { separator: true },
             { text: qsTr("Скрытые файлы"), checked: dir.showHidden, icon: "\u{f070}", shortcut: "Ctrl+H",
               act: function () { win.showHidden = !win.showHidden } },
@@ -655,6 +727,7 @@ Window {
     Shortcut { sequence: "Ctrl+Shift+N"; onActivated: win.newFolder() }
     Shortcut { sequence: "Ctrl+D"; onActivated: win.toggleBookmark(dir.path) }
     Shortcut { sequences: ["Alt+Return", "Alt+Enter"]; onActivated: win.showProperties() }
+    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: win.sortDesc = !win.sortDesc }
     Shortcut { sequence: "F9"; onActivated: win.sidebarShown = !(win.sidebarShown ?? win.width >= 760) }
     Shortcut { sequence: "F4"; onActivated: FileOps.openTerminal(dir.path) }
     Shortcut { sequence: "Ctrl+T"; enabled: !win.picking; onActivated: win.newTab(dir.path, true) }
@@ -856,6 +929,28 @@ Window {
                     }
                 }
 
+                TextButton {
+                    text: (win.sortKey === "date" ? qsTr("По дате")
+                          : win.sortKey === "size" ? qsTr("По размеру")
+                          : win.sortKey === "type" ? qsTr("По типу")
+                          : win.sortKey === "ext" ? qsTr("По расширению")
+                          : win.sortKey === "created" ? qsTr("По дате создания") : qsTr("По имени"))
+                          + (win.sortDesc ? " ↓" : " ↑")
+                    onClicked: {
+                        var pt = mapToItem(win.contentItem, 0, height)
+                        menu.show(pt.x, pt.y, win.sortItems(), pt.y - height)
+                    }
+                }
+                GlassButton {
+                    text: "\u{f03a}"
+                    active: win.groupBy !== ""
+                    tooltip: win.groupBy === "type" ? qsTr("Группы по типу")
+                           : win.groupBy === "date" ? qsTr("Группы по дате") : qsTr("Без группировки")
+                    onClicked: {
+                        var pt = mapToItem(win.contentItem, 0, height)
+                        menu.show(pt.x, pt.y, win.groupItems(), pt.y - height)
+                    }
+                }
                 GlassButton {
                     Layout.leftMargin: 4
                     text: pane.gridMode ? "\u{f03a}" : "\u{f00a}"
@@ -1263,6 +1358,10 @@ Window {
         function open() { active = true; (item as SettingsDialog).open() }
         sourceComponent: SettingsDialog {
             parent: win.contentItem
+            foldersFirst: viewDefaults.foldersFirst
+            onFoldersFirstToggled: (on) => viewDefaults.foldersFirst = on
+            rememberFolders: viewDefaults.rememberFolders
+            onRememberFoldersToggled: (on) => viewDefaults.rememberFolders = on
             onClosed: pane.focusView()
             onFirstRunRequested: firstRun.open()
             onMessage: (text) => win.toast(text)
@@ -1289,6 +1388,7 @@ Window {
     }
 
     Component.onCompleted: {
+        viewReady = true
         Theme.afterFrame(win.contentItem, function () { Theme.imagesInBackground = true })
         newTab(startPath || Places.places[0].path, true)
         if (startSelect) { tab.pendingSelect = [startSelect]; dir.reload() }

@@ -159,13 +159,13 @@ QString Thumbnailer::thumbnail(const QString &path, const QString &mimeType, int
         return {};
 
     const qint64 mtime = mtimeOf(path);
-    const auto nv = m_never.constFind(path);
-    if (nv != m_never.cend() && *nv == mtime)
+    const auto *nv = m_never.object(path);
+    if (nv != nullptr && *nv == mtime)
         return {};
     const int want = flavorFor(size);
     const QString key = pendingKey(want, path);
-    const auto it = m_known.constFind(key);
-    if (it != m_known.cend() && it->mtime == mtime)
+    const auto *it = m_known.object(key);
+    if (it != nullptr && it->mtime == mtime)
         return it->url;
 
     const QString name = cacheName(path);
@@ -184,7 +184,7 @@ QString Thumbnailer::thumbnail(const QString &path, const QString &mimeType, int
     for (int f = want; f < 4; ++f) {
         const QString url = cached(f);
         if (!url.isEmpty()) {
-            m_known.insert(key, {mtime, url});
+            m_known.insert(key, new Known{mtime, url});
             return url;
         }
     }
@@ -193,7 +193,7 @@ QString Thumbnailer::thumbnail(const QString &path, const QString &mimeType, int
     for (const QString &dir : std::as_const(m_failDirs)) {
         const QString file = dir + name;
         if (QFileInfo::exists(file) && sameMtime(file, mtime)) {
-            m_never.insert(path, mtime);
+            m_never.insert(path, new qint64(mtime));
             return {};
         }
     }
@@ -205,7 +205,7 @@ QString Thumbnailer::thumbnail(const QString &path, const QString &mimeType, int
         }
     } else if (m_supportedLoaded) {
         // Не умеет никто — запоминаем, чтобы не проверять кэш на каждой перерисовке
-        m_never.insert(path, mtime);
+        m_never.insert(path, new qint64(mtime));
         return {};
     }
     // Пока tumbler делает крупную — показываем меньшую, если есть
@@ -266,7 +266,7 @@ void Thumbnailer::onError(uint, const QStringList &uris, int, const QString &)
             ours |= m_pending.remove(pendingKey(f, path));
         if (!ours)
             continue; // чужой заказ
-        m_never.insert(path, mtimeOf(path));
+        m_never.insert(path, new qint64(mtimeOf(path)));
     }
 }
 

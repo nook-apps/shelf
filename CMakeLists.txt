@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(shelf VERSION 0.5.0 LANGUAGES CXX)
+project(shelf VERSION 0.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,7 @@ qt_add_qml_module(shelf
         fonts/ShelfIcons.ttf fonts/ShelfIconsPropo.ttf
         data/matugen/shelf-colors.json data/icons/io.github.nook_apps.Shelf.svg
     SOURCES
-        src/DirModel.h src/DirModel.cpp
+        src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp
         src/FileOps.h src/FileOps.cpp
         src/Places.h src/Places.cpp
         src/ThemeSource.h src/ThemeSource.cpp
@@ -86,6 +86,7 @@ qt_add_qml_module(shelf
         src/Apps.h src/Apps.cpp
         src/Trash.h src/Trash.cpp
         src/Session.h src/Session.cpp
+        src/FolderViews.h src/FolderViews.cpp
         src/Terminal.h src/Terminal.cpp
         src/Environment.h src/Environment.cpp
         src/Picker.h src/Picker.cpp
@@ -124,13 +125,19 @@ if(SHELF_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     enable_testing()
     qt_add_executable(shelf_tests tests/tst_core.cpp
-        src/DirModel.h src/DirModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
+        src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
         src/Trash.h src/Trash.cpp src/Terminal.h src/Terminal.cpp src/Language.h src/Language.cpp
-        src/GlassIcons.h src/GlassIcons.cpp)
+        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp)
     qt_add_resources(shelf_tests "i18n" PREFIX "/" FILES ${I18N_FILES})
     target_include_directories(shelf_tests PRIVATE src)
     target_link_libraries(shelf_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent)
     add_test(NAME core COMMAND shelf_tests)
+    qt_add_executable(shelf_resource_tests tests/tst_resources.cpp
+        src/Thumbnailer.h src/Thumbnailer.cpp src/portal/FileChooser.h src/portal/FileChooser.cpp)
+    target_include_directories(shelf_resource_tests PRIVATE src)
+    target_compile_definitions(shelf_resource_tests PRIVATE SHELF_EXE="/nonexistent-shelf-test-installed")
+    target_link_libraries(shelf_resource_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::DBus)
+    add_test(NAME resources COMMAND shelf_resource_tests)
     # Все строки интерфейса переведены, лишних в словарях нет
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)

@@ -17,6 +17,9 @@ struct FileEntry {
     QString mimeComment;
     QString icon;       // "имя,запасное" для image://icon/
     QDateTime mtime;
+    QDateTime created;
+    QString extension;
+    int group = 0;
     QString origin;     // в корзине: папка, откуда удалён
     QDateTime deleted;  // в корзине: когда удалён
     qint64 size = 0;

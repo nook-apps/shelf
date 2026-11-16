@@ -1,4 +1,5 @@
 #include "FileOps.h"
+#include "ArchiveOutput.h"
 
 #include "FileEntry.h"
 #include "Terminal.h"
@@ -79,7 +80,7 @@ qint64 readOffset(qint64 pid, const QString &path)
     return -1;
 }
 
-// Запустить программу и ждать; tick — раз в 100 мс, пока работает (накопленный вывод).
+// tick получает новые порции вывода и пустую порцию каждые 100 мс без завершения.
 // false — отменили (процесс убит) или ошибка (текст в error)
 bool runTool(const QString &program, const QStringList &args, const QString &workDir, const std::atomic_bool &cancel,
              const std::function<void(qint64 pid, const QByteArray &out)> &tick, QString &error)
@@ -96,23 +97,31 @@ bool runTool(const QString &program, const QStringList &args, const QString &wor
     }
     // Пароль и прочие вопросы задать некому — пусть программа сразу завершится с ошибкой
     p.closeWriteChannel();
-    QByteArray out;
+    ArchiveOutput output;
+    const auto drain = [&] {
+        while (p.bytesAvailable() > 0) {
+            const auto chunk = p.read(8192);
+            output.append(chunk);
+            tick(p.processId(), chunk);
+        }
+    };
+    QObject::connect(&p, &QProcess::readyRead, &p, drain);
     while (!p.waitForFinished(100)) {
         if (cancel.load()) {
             p.kill();
             p.waitForFinished();
             return false;
         }
-        out += p.readAll();
-        tick(p.processId(), out);
+        drain();
+        tick(p.processId(), {});
     }
-    out += p.readAll();
+    drain();
     // У 7z код 1 — предупреждение, архив при этом готов
     const bool sevenZip = !program.endsWith(QLatin1String("bsdtar"));
     if (p.exitStatus() == QProcess::NormalExit && (p.exitCode() == 0 || (sevenZip && p.exitCode() == 1)))
         return true;
     QString last;
-    for (const QByteArray &line : out.split('\n')) {
+    for (const QByteArray &line : output.tail().split('\n')) {
         const QString l = QString::fromUtf8(line).trimmed();
         if (!l.isEmpty())
             last = l;
@@ -1025,7 +1034,11 @@ void FileOps::extract(const QString &archive, const QString &destDir, bool intoF
                        : QStringList{QStringLiteral("x"), QStringLiteral("-y"), QStringLiteral("-bd"), QStringLiteral("-o") + tmp,
                                      QStringLiteral("--"), file};
         };
+        QElapsedTimer progressTimer;
+        progressTimer.start();
         const auto tick = [&](qint64 pid, const QByteArray &) {
+            if (progressTimer.elapsed() < 100) return;
+            progressTimer.restart();
             const qint64 off = readOffset(pid, archive);
             if (off < 0 || size <= 0)
                 return;
@@ -1156,14 +1169,20 @@ void FileOps::compress(const QStringList &paths, const QString &format)
                           QStringLiteral("-C"), parent, QStringLiteral("--")} + names
             : QStringList{QStringLiteral("a"), QStringLiteral("-tzip"), QStringLiteral("-bsp1"), QStringLiteral("-bb0"),
                           QStringLiteral("-y"), tmp, QStringLiteral("--")} + names;
-        const auto tick = [&](qint64, const QByteArray &out) {
+        ArchiveOutput output;
+        QElapsedTimer progressTimer;
+        progressTimer.start();
+        const auto tick = [&](qint64, const QByteArray &chunk) {
+            output.append(chunk);
+            if (progressTimer.elapsed() < 100) return;
+            progressTimer.restart();
             double p = 0;
             if (bsd) {
-                const qsizetype added = out.count("\na ") + (out.startsWith("a ") ? 1 : 0);
+                const qsizetype added = output.added();
                 p = total > 0 ? qMin(1.0, double(added) / double(total)) : 0;
             } else {
                 static const QRegularExpression pct(QStringLiteral("(\\d+)%"));
-                QRegularExpressionMatchIterator it = pct.globalMatch(QString::fromUtf8(out.right(200)));
+                QRegularExpressionMatchIterator it = pct.globalMatch(QString::fromUtf8(output.tail().right(200)));
                 while (it.hasNext())
                     p = it.next().captured(1).toDouble() / 100.0;
             }

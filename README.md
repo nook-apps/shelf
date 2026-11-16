@@ -49,6 +49,10 @@ Wayland-приложение со своим `app_id` и `.desktop` (его мо
 ## 🧩 Возможности
 
 - **Навигация** — сетка и список, история назад/вперёд, хлебные крошки с вводом пути, скрытые файлы
+- **Вид папки** — сортировка, группировка по типу или дате, сетка или список и размер значков
+  запоминаются отдельно для каждой папки. Сортировка и группировка доступны в верхней панели;
+  папки сверху можно отключить в настройках. Сброс вида — в меню папки, отключение запоминания — в настройках.
+  Окна выбора файлов используют сохранённый вид, но не меняют его.
 - **Быстрый просмотр** — <kbd>Space</kbd>: картинка, начало текста или кода, миниатюра PDF и видео,
   для остального — значок и сведения; стрелки листают соседние файлы, <kbd>Enter</kbd> открывает
 - **Выделение** — <kbd>Ctrl</kbd>/<kbd>Shift</kbd>-клик и рамка: потянуть мышью с пустого места
@@ -117,6 +121,7 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 | <kbd>Ctrl</kbd>+<kbd>H</kbd> | Скрытые файлы |
 | <kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd> | Сетка / список |
 | <kbd>Ctrl</kbd>+колесо, <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd> | Крупнее / мельче / обычный размер значков |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Изменить направление сортировки |
 | <kbd>F2</kbd> | Переименовать |
 | <kbd>Delete</kbd> | В корзину |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> | Копировать / вырезать / вставить |
@@ -141,7 +146,7 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 **Fedora 43 и новее** — готовый пакет на странице [выпусков](https://github.com/nook-apps/shelf/releases):
 
 ```sh
-sudo dnf install ./shelf-0.5.0-1.fc43.x86_64.rpm
+sudo dnf install ./shelf-0.5.1-1.fc43.x86_64.rpm
 ```
 
 Пакету нужен Qt 6.10 или новее, поэтому он ставится и на следующие выпуски Fedora.
@@ -149,13 +154,13 @@ sudo dnf install ./shelf-0.5.0-1.fc43.x86_64.rpm
 **Debian 13, Ubuntu 25.04 и новее** — `.deb` на странице выпусков:
 
 ```sh
-sudo apt install ./shelf_0.5.0_amd64.deb
+sudo apt install ./shelf_0.5.1_amd64.deb
 ```
 
 **Arch Linux** — готовый пакет на странице выпусков или сборка из `PKGBUILD`:
 
 ```sh
-sudo pacman -U ./shelf-fm-0.5.0-1-x86_64.pkg.tar.zst
+sudo pacman -U ./shelf-fm-0.5.1-1-x86_64.pkg.tar.zst
 # или
 git clone https://github.com/nook-apps/shelf && cd shelf/packaging/arch && makepkg -si
 ```
@@ -313,3 +318,5 @@ Shelf распространяется под [GNU GPL v3](LICENSE) или бо�
 
 - Шрифт значков `fonts/` — SIL Open Font License 1.1 (`fonts/OFL.txt`), значки Nerd Fonts — MIT / OFL
 - Логотипы языков в `icons/lang/` — CC0 ([Simple Icons](https://simpleicons.org))
+
+План работ по производительности и ресурсам после аудита: [docs/PERFORMANCE_PLAN.md](docs/PERFORMANCE_PLAN.md).
