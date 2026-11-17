@@ -9,13 +9,14 @@
    - `CHANGELOG.md` — раздел `## X.Y.Z — дата` первым (из него берутся заметки к релизу)
    - `README.md` — имена пакетов в «Установке» (`shelf-X.Y.Z-1.fc43…`, `shelf_X.Y.Z_amd64.deb`,
      `shelf-fm-X.Y.Z-1…`) и всё, что изменилось в возможностях и горячих клавишах
-   - `docs/release-cards/shelf-X.Y.Z.png` — англоязычная карточка 1200×630. Сгенерировать из
-     сохранённого шаблона (нужен Chromium), проверить изображение и добавить в коммит:
+   - `docs/release-cards/shelf-X.Y.Z.png` — англоязычная карточка 1200×630. Локальный генератор
+     и HTML-шаблон хранятся в `~/.local/share/shelf/release-cards/` и не входят в Git. Из корня
+     проекта сгенерировать карточку (нужен Chromium), проверить изображение и добавить в коммит:
      ```sh
-     python3 tools/release-card.py X.Y.Z 'Short English summary of the release'
+     python3 ~/.local/share/shelf/release-cards/release-card.py X.Y.Z 'Short English summary of the release'
      ```
-     Основную и вторую метку можно задать через `--type` и `--secondary`. Шаблон также можно
-     открыть вручную: `tools/release-card.html`.
+     Основную и вторую метку можно задать через `--type` и `--secondary`. HTML-шаблон можно
+     открыть и заполнить вручную.
 2. Закоммитить, запушить и поставить тег:
    ```sh
    git tag -a vX.Y.Z -m "Shelf X.Y.Z" && git push origin vX.Y.Z

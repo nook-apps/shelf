@@ -1,2 +1,4 @@
 build/
 .cache/
+tools/release-card.html
+tools/release-card.py
