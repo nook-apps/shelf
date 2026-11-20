@@ -15,6 +15,7 @@
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 ![Wayland](https://img.shields.io/badge/Wayland-FFBC00?style=for-the-badge&logo=wayland&logoColor=black)
 ![Hyprland](https://img.shields.io/badge/Hyprland-58E1FF?style=for-the-badge&logo=hyprland&logoColor=black)
+[![Совместимо с LocalSend](https://img.shields.io/badge/LocalSend-compatible-008080?style=for-the-badge&logo=localsend&logoColor=white)](https://localsend.org)
 ![Python](https://img.shields.io/badge/Python-shapely-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![SVG](https://img.shields.io/badge/SVG-icons-FFB13B?style=for-the-badge&logo=svg&logoColor=black)
 
