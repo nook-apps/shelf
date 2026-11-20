@@ -6,6 +6,7 @@
 #include "FileOps.h"
 #include "GlassIcons.h"
 #include "Language.h"
+#include "Apps.h"
 
 #include <QAbstractItemModelTester>
 #include <QDir>
@@ -17,6 +18,7 @@
 #include <QRandomGenerator>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -70,6 +72,49 @@ private slots:
     {
         m_dir = m_home.path() + "/w/" + QTest::currentTestFunction();
         QVERIFY(QDir().mkpath(m_dir));
+    }
+
+    void localSendLaunchesSelectionAndDetectsInstallation()
+    {
+        const auto oldPath = qgetenv("PATH");
+        const auto oldDirs = qgetenv("XDG_DATA_DIRS");
+        const auto restore = qScopeGuard([&] {
+            qputenv("PATH", oldPath);
+            if (oldDirs.isNull()) qunsetenv("XDG_DATA_DIRS");
+            else qputenv("XDG_DATA_DIRS", oldDirs);
+        });
+        qputenv("PATH", m_dir.toUtf8());
+        qputenv("XDG_DATA_DIRS", m_dir.toUtf8());
+        const QString desktop = m_dir + "/applications/org.localsend.localsend_app.desktop";
+        const QString log = m_dir + "/args";
+        const QString fake = m_dir + "/gio";
+        write(fake, "#!/bin/sh\nprintf '%s\\0' \"$@\" > '" + log.toUtf8() + "'\n");
+        QVERIFY(QFile::setPermissions(fake, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        Apps apps;
+        QVERIFY(!apps.localSendAvailable());
+        const QStringList paths{m_dir + "/привет $HOME; 'quote'.txt", m_dir + "/line\nbreak.txt", m_dir + "/folder"};
+        write(paths[0]);
+        write(paths[1]);
+        QVERIFY(QDir().mkpath(paths[2]));
+        QVERIFY(!apps.sendWithLocalSend(paths));
+        write(desktop, "[Desktop Entry]\nType=Application\nName=LocalSend\nExec=flatpak run org.localsend.localsend_app %U\n");
+        QVERIFY(apps.localSendAvailable()); // сразу, даже если Apps уже сканировал систему
+        QVERIFY(!apps.sendWithLocalSend({}));
+        QVERIFY(!apps.sendWithLocalSend({m_dir + "/missing"}));
+        QVERIFY(!apps.sendWithLocalSend({"relative.txt"}));
+        QVERIFY(apps.sendWithLocalSend(paths));
+        QByteArray expected("launch\0", 7);
+        expected += desktop.toUtf8() + '\0';
+        for (const auto &path : paths) expected += path.toUtf8() + '\0';
+        QTRY_COMPARE(read(log), expected);
+        QVERIFY(QFile::remove(desktop));
+        QVERIFY(!apps.localSendAvailable());
+        QVERIFY(QFile::rename(fake, m_dir + "/localsend"));
+        QVERIFY(apps.localSendAvailable());
+        QVERIFY(apps.sendWithLocalSend(paths));
+        expected.clear();
+        for (const auto &path : paths) expected += path.toUtf8() + '\0';
+        QTRY_COMPARE(read(log), expected);
     }
 
     void folderViewsPersistAndReset()

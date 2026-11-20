@@ -81,7 +81,7 @@ Popup {
                 }
                 Text {
                     id: ic
-                    visible: !entry.sep && !entry.heading
+                    visible: !entry.sep && !entry.heading && (!entry.modelData.iconSource || appIcon.status === Image.Error)
                     x: 10; width: 20
                     anchors.verticalCenter: parent.verticalCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -90,6 +90,17 @@ Popup {
                     font.family: Theme.iconFont
                     font.pixelSize: Theme.fontSize - 1
                     opacity: entry.on ? 1 : 0.4
+                }
+                Image {
+                    id: appIcon
+                    visible: !entry.sep && !entry.heading && !!entry.modelData.iconSource
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 20; height: 20
+                    sourceSize: Qt.size(40, 40)
+                    source: entry.modelData.iconSource || ""
+                    opacity: entry.on ? 1 : 0.4
+                    Accessible.ignored: true
                 }
                 Text {
                     visible: !entry.sep && !entry.heading

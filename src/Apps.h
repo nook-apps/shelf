@@ -29,6 +29,8 @@ public:
     Q_INVOKABLE QVariantList allApps();
     Q_INVOKABLE QString defaultName(const QString &mimeType);
     Q_INVOKABLE bool launch(const QString &appId, const QStringList &paths);
+    Q_INVOKABLE bool localSendAvailable();
+    Q_INVOKABLE bool sendWithLocalSend(const QStringList &paths);
     // Открыть файл программой по умолчанию для его типа — тип Shelf определил сам
     // (по содержимому и расширению). Не xdg-open: на Hyprland тот смотрит тип через
     // file(1), а для неё .pptx и .xlsx — просто ZIP. false — программы для типа нет
@@ -62,6 +64,7 @@ private:
     };
 
     void scan();
+    QString localSendAppId();
     Assoc readAssociations() const;
     QString defaultFor(const QString &mime, const Assoc &assoc) const;
     static QVariantMap toMap(const App &a, bool isDefault);

@@ -1,12 +1,12 @@
 # Maintainer: Stasyao37 <kapitonov.stass@gmail.com>
 pkgname=shelf-fm
 _name=shelf
-pkgver=0.5.2
+pkgver=0.5.3
 pkgrel=1
 pkgdesc="Glass file manager for Hyprland in Qt 6 / QML"
 arch=('x86_64' 'aarch64')
 url="https://github.com/nook-apps/shelf"
-license=('GPL-3.0-or-later' 'OFL-1.1' 'MIT' 'CC0-1.0')
+license=('GPL-3.0-or-later' 'OFL-1.1' 'MIT' 'CC0-1.0' 'Apache-2.0')
 # QML-модули (Controls, Effects, Layouts, QtCore) входят в qt6-declarative;
 # SVG и Wayland — плагины, грузятся во время работы
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland'
@@ -34,5 +34,6 @@ build() {
 package() {
   DESTDIR="$pkgdir" cmake --install build
   install -Dm644 "$_name-$pkgver/fonts/OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  install -Dm644 "$_name-$pkgver/icons/localsend.LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LocalSend.txt"
   install -Dm644 "$_name-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

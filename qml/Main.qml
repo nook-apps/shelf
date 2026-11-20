@@ -597,6 +597,8 @@ Window {
             { text: qsTr("Открыть"), icon: "\u{f07c}", shortcut: "Enter", act: openSelected },
             { text: qsTr("Открыть с помощью…"), icon: "\u{f1b2}", act: openWith },
         ]
+        if (!picking)
+            items.push({ text: qsTr("Отправить через LocalSend"), icon: "\u{f1d8}", iconSource: "qrc:/qt/qml/Shelf/icons/localsend.png", act: function () { win.sendWithLocalSend(paths) } })
         if (dir.searchQuery)
             items.push({ text: qsTr("Показать в папке"), icon: "\u{f07b}", enabled: single, act: function () {
                 var parent = p.substring(0, p.lastIndexOf("/")) || "/"
@@ -1377,6 +1379,11 @@ Window {
         parent: win.contentItem
         onClosed: pane.focusView()
     }
+    function sendWithLocalSend(paths) {
+        if (!Apps.localSendAvailable()) { localSendDlg.open(); return }
+        if (!Apps.sendWithLocalSend(paths)) toast(qsTr("Не удалось запустить LocalSend"))
+    }
+
     // Настройки и первая настройка создаются, только когда их открыли: их проверки
     // (hyprctl, tumbler, программы в PATH) стоили каждому запуску десятки миллисекунд
     Loader {
@@ -1412,6 +1419,16 @@ Window {
         parent: win.contentItem
         onFailed: (m) => win.toast(m)
         onClosed: pane.focusView()
+    }
+
+    Loader {
+        id: localSendDlg
+        active: false
+        function open() { active = true; (item as LocalSendDialog).open() }
+        sourceComponent: LocalSendDialog {
+            parent: win.contentItem
+            onClosed: { pane.focusView(); localSendDlg.active = false }
+        }
     }
 
     Component.onCompleted: {
