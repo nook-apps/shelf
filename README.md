@@ -66,6 +66,8 @@ Wayland-приложение со своим `app_id` и `.desktop` (его мо
 - **Операции** — копирование, перемещение и вставка с прогрессом и отменой, переименование на месте,
   удаление в корзину, новая папка, окно свойств, «открыть в терминале», «открыть с помощью»
   (по `mimeapps.list`, с выбором приложения по умолчанию)
+- **LocalSend** — отправка выбранных файлов и папок на другие устройства через контекстное меню.
+  Если LocalSend не установлен, Shelf предложит команду установки и ссылку на сайт.
 - **Архивы** — «Распаковать сюда», «Распаковать в папку», «Сжать в zip / tar.zst» в меню файла,
   с прогрессом и отменой; <kbd>Ctrl</kbd>+<kbd>Z</kbd> убирает распакованное и созданный архив.
   Нужен `bsdtar` (libarchive) или `7z`
@@ -147,7 +149,7 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 **Fedora 43 и новее** — готовый пакет на странице [выпусков](https://github.com/nook-apps/shelf/releases):
 
 ```sh
-sudo dnf install ./shelf-0.5.2-1.fc43.x86_64.rpm
+sudo dnf install ./shelf-0.5.3-1.fc43.x86_64.rpm
 ```
 
 Пакету нужен Qt 6.10 или новее, поэтому он ставится и на следующие выпуски Fedora.
@@ -155,13 +157,13 @@ sudo dnf install ./shelf-0.5.2-1.fc43.x86_64.rpm
 **Debian 13, Ubuntu 25.04 и новее** — `.deb` на странице выпусков:
 
 ```sh
-sudo apt install ./shelf_0.5.2_amd64.deb
+sudo apt install ./shelf_0.5.3_amd64.deb
 ```
 
 **Arch Linux** — готовый пакет на странице выпусков или сборка из `PKGBUILD`:
 
 ```sh
-sudo pacman -U ./shelf-fm-0.5.2-1-x86_64.pkg.tar.zst
+sudo pacman -U ./shelf-fm-0.5.3-1-x86_64.pkg.tar.zst
 # или
 git clone https://github.com/nook-apps/shelf && cd shelf/packaging/arch && makepkg -si
 ```
@@ -319,5 +321,6 @@ Shelf распространяется под [GNU GPL v3](LICENSE) или бо�
 
 - Шрифт значков `fonts/` — SIL Open Font License 1.1 (`fonts/OFL.txt`), значки Nerd Fonts — MIT / OFL
 - Логотипы языков в `icons/lang/` — CC0 ([Simple Icons](https://simpleicons.org))
+- Значок [LocalSend](https://localsend.org) — Apache-2.0 ([лицензия](icons/localsend.LICENSE))
 
 План работ по производительности и ресурсам после аудита: [docs/PERFORMANCE_PLAN.md](docs/PERFORMANCE_PLAN.md).

@@ -1,3 +1,11 @@
+shelf (0.5.3) unstable; urgency=medium
+
+  * Send selected files and folders with LocalSend from the file menu.
+  * Offer installation instructions when LocalSend is not installed.
+  * Refresh release cards with a subtle application accent.
+
+ -- Stasyao37 <kapitonov.stass@gmail.com>  Fri, 20 Nov 2026 17:45:00 +0300
+
 shelf (0.5.2) unstable; urgency=medium
 
   * Clarify sort controls and grouping icons; compact the grouped grid.

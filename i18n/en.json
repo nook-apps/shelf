@@ -359,5 +359,17 @@
   "большие": "largest",
   "маленькие": "smallest",
   "Значки": "Icons",
-  "Список": "List"
+  "Список": "List",
+  "Отправить через LocalSend": "Send with LocalSend",
+  "Не удалось запустить LocalSend": "Could not launch LocalSend",
+  "Установите LocalSend": "Install LocalSend",
+  "Отправляйте файлы с компьютера на телефон и другие устройства в одной сети.": "Send files from your computer to your phone and other devices on the same network.",
+  "• Без кабеля, аккаунта и загрузки в облако": "• No cable, account or cloud upload",
+  "• Между Linux, Windows, macOS, Android и iPhone": "• Between Linux, Windows, macOS, Android and iPhone",
+  "Команда установки": "Installation command",
+  "Для команды нужны Flatpak и Flathub. Другие способы установки — на сайте LocalSend. Установите LocalSend и на принимающее устройство.": "This command needs Flatpak and Flathub. See the LocalSend website for other installation options. Install LocalSend on the receiving device too.",
+  "Скопировать команду": "Copy command",
+  "Сайт LocalSend": "LocalSend website",
+  "Скопировано": "Copied",
+  "Закрыть": "Close"
 }

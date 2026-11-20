@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(shelf VERSION 0.5.2 LANGUAGES CXX)
+project(shelf VERSION 0.5.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,7 @@ set(QML_FILES
     qml/ConflictDialog.qml
     qml/KeyedModel.qml
     qml/OpenWithDialog.qml
+    qml/LocalSendDialog.qml
     qml/FolderTab.qml
     qml/TabStrip.qml
     qml/SettingsDialog.qml
@@ -66,6 +67,7 @@ qt_add_qml_module(shelf
         icons/pdf.svg icons/spreadsheet.svg icons/presentation.svg icons/package.svg icons/script.svg
         icons/config.svg icons/certificate.svg icons/key.svg icons/html.svg
         icons/audio.svg icons/video.svg icons/font.svg icons/book.svg icons/code.svg icons/executable.svg icons/exe.svg
+        icons/localsend.png icons/localsend.LICENSE
         icons/emblems/user-home.svg icons/emblems/user-desktop.svg icons/emblems/folder-documents.svg
         icons/emblems/folder-download.svg icons/emblems/folder-pictures.svg icons/emblems/folder-music.svg
         icons/emblems/folder-videos.svg icons/emblems/folder-templates.svg icons/emblems/folder-publicshare.svg icons/emblems/archive.svg icons/emblems/folder-projects.svg
@@ -127,7 +129,7 @@ if(SHELF_TESTS)
     qt_add_executable(shelf_tests tests/tst_core.cpp
         src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
         src/Trash.h src/Trash.cpp src/Terminal.h src/Terminal.cpp src/Language.h src/Language.cpp
-        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp)
+        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp src/Apps.h src/Apps.cpp)
     qt_add_resources(shelf_tests "i18n" PREFIX "/" FILES ${I18N_FILES})
     target_include_directories(shelf_tests PRIVATE src)
     target_link_libraries(shelf_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent)

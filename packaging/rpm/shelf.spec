@@ -1,11 +1,11 @@
 Name:           shelf
-Version:        0.5.2
+Version:        0.5.3
 Release:        1%{?dist}
 Summary:        Glass file manager for Hyprland in Qt 6 / QML
 
 # Код — GPL-3.0-or-later; вшитый шрифт значков (fonts/) — OFL-1.1, значки Nerd Fonts — MIT;
-# логотипы языков (icons/lang/) — CC0-1.0
-License:        GPL-3.0-or-later AND OFL-1.1 AND MIT AND CC0-1.0
+# логотипы языков (icons/lang/) — CC0-1.0; значок LocalSend — Apache-2.0
+License:        GPL-3.0-or-later AND OFL-1.1 AND MIT AND CC0-1.0 AND Apache-2.0
 URL:            https://github.com/nook-apps/shelf
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
@@ -54,7 +54,7 @@ first-run setup that checks the environment.
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.Shelf.desktop
 
 %files
-%license LICENSE fonts/OFL.txt
+%license LICENSE fonts/OFL.txt icons/localsend.LICENSE
 %doc README.md CHANGELOG.md
 %{_bindir}/shelf
 %{_datadir}/applications/io.github.nook_apps.Shelf.desktop
@@ -65,6 +65,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.S
 %{_datadir}/xdg-desktop-portal/portals/shelf.portal
 
 %changelog
+* Fri Nov 20 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.3-1
+- Send files and folders with LocalSend from the file menu
+- Offer LocalSend installation instructions; refresh release cards
 * Tue Nov 17 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.2-1
 - Clearer sort controls and grouping icons; compact grouped grid
 - Fix grouped folder navigation and delayed spring-open after grouping

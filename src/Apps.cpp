@@ -314,6 +314,37 @@ bool Apps::launch(const QString &appId, const QStringList &paths)
     return ok;
 }
 
+QString Apps::localSendAppId()
+{
+    // Повторная попытка после установки должна видеть новый .desktop сразу.
+    m_scannedAt = 0;
+    scan();
+    for (const auto &id : {QStringLiteral("org.localsend.localsend_app.desktop"),
+                           QStringLiteral("localsend.desktop"), QStringLiteral("localsend_app.desktop")})
+        if (m_byId.value(id, -1) >= 0)
+            return id;
+    return {};
+}
+
+bool Apps::localSendAvailable()
+{
+    return !localSendAppId().isEmpty() || !QStandardPaths::findExecutable(QStringLiteral("localsend")).isEmpty();
+}
+
+bool Apps::sendWithLocalSend(const QStringList &paths)
+{
+    if (paths.isEmpty())
+        return false;
+    for (const auto &path : paths)
+        if (!QDir::isAbsolutePath(path) || !QFileInfo::exists(path))
+            return false;
+    const QString id = localSendAppId();
+    if (!id.isEmpty())
+        return launch(id, paths);
+    const QString exe = QStandardPaths::findExecutable(QStringLiteral("localsend"));
+    return !exe.isEmpty() && QProcess::startDetached(exe, paths);
+}
+
 // Exec по спецификации Desktop Entry: кавычки, %f/%F — пути, %u/%U — URL;
 // с %f/%u на каждый файл свой запуск
 QList<QStringList> Apps::commandLines(const App &a, const QStringList &paths)
