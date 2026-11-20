@@ -52,7 +52,7 @@ stdenv.mkDerivation {
     description = "Glass file manager for Hyprland in Qt 6 / QML";
     homepage = "https://github.com/nook-apps/shelf";
     # Код — GPL-3.0-or-later; шрифт значков — OFL-1.1 и MIT (Nerd Fonts); логотипы языков — CC0; значок LocalSend — Apache-2.0
-    license = with lib.licenses; [ gpl3Plus ofl mit cc0 apache20 ];
+    license = with lib.licenses; [ gpl3Plus ofl mit cc0 asl20 ];
     platforms = lib.platforms.linux;
     mainProgram = "shelf";
   };
