@@ -672,8 +672,8 @@ Window {
         var p = FileOps.makeDir(dir.path, qsTr("Новая папка"))
         if (!p) { toast(qsTr("Не удалось создать папку")); return }
         tab.pendingSelect = [p]
+        tab.pendingRename = p
         dir.reload()
-        pane.renamingPath = p
     }
     function createFile(source) {
         if (inTrash || picking) return
@@ -682,7 +682,7 @@ Window {
         const path = FileOps.newFile(dir.path, name, source || "")
         if (!path) { toast(qsTr("Не удалось создать файл")); return }
         tab.pendingSelect = [path]
-        pane.renamingPath = path
+        tab.pendingRename = path
         dir.reload()
     }
     function copySelected(cut) {

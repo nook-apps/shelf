@@ -17,6 +17,7 @@ Item {
     property int histIndex: -1
     // Что выделить после ближайшего перечитывания папки
     property var pendingSelect: []
+    property string pendingRename: ""
     property int pendingRow: -1
 
     signal message(string text)
@@ -39,10 +40,15 @@ Item {
 
     DirModel {
         id: tabDir
+        onPathChanged: tab.pendingRename = ""
         onReloaded: {
             if (tab.pendingSelect.length > 0) {
                 tabPane.selectPaths(tab.pendingSelect)
                 tab.pendingSelect = []
+                const renamePath = tab.pendingRename
+                tab.pendingRename = ""
+                if (renamePath && tabDir.indexOfPath(renamePath) >= 0)
+                    tabPane.renamingPath = renamePath
             } else if (tab.pendingRow >= 0) {
                 tabPane.selectRow(tab.pendingRow)
                 tab.pendingRow = -1
