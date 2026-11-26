@@ -2,6 +2,7 @@
 #include "ArchiveOutput.h"
 
 #include "FileEntry.h"
+#include "RemotePath.h"
 #include "Terminal.h"
 #include "Trash.h"
 
@@ -13,19 +14,22 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
-#include <QImageReader>
 #include <QMimeData>
 #include <QMimeDatabase>
 #include <QPointer>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QScopeGuard>
+#include <QSet>
 #include <QStandardPaths>
-#include <QStringDecoder>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QtConcurrent>
 
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <cstdio>
 
 namespace {
 const QString kGnomeCopied = QStringLiteral("x-special/gnome-copied-files");
@@ -177,10 +181,18 @@ bool copyFile(const QString &src, const QString &dst, CopyCtx &ctx)
         ctx.done += n;
         ctx.report(name);
     }
+    if (!out.flush()) {
+        ctx.error = QCoreApplication::translate("FileOps", "Ошибка записи %1").arg(dst);
+        out.remove();
+        return false;
+    }
     out.setPermissions(in.permissions());
     out.setFileTime(QFileInfo(src).lastModified(), QFileDevice::FileModificationTime);
     return true;
 }
+
+void makeWritable(const QString &path);
+bool removeTree(const QString &path);
 
 bool copyTree(const QString &src, const QString &dst, CopyCtx &ctx)
 {
@@ -189,10 +201,14 @@ bool copyTree(const QString &src, const QString &dst, CopyCtx &ctx)
         return QFile::link(fi.symLinkTarget(), dst) || (ctx.error = QCoreApplication::translate("FileOps", "Не удалось создать ссылку %1").arg(dst), false);
     if (!fi.isDir())
         return copyFile(src, dst, ctx);
-    if (!QDir().mkpath(dst)) {
+    if (!QDir().mkdir(dst)) {
         ctx.error = QCoreApplication::translate("FileOps", "Не удалось создать папку %1").arg(dst);
         return false;
     }
+    auto cleanup = qScopeGuard([&] {
+        makeWritable(dst);
+        removeTree(dst);
+    });
     const QFileInfoList children =
         QDir(src).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
     for (const QFileInfo &c : children) {
@@ -202,6 +218,7 @@ bool copyTree(const QString &src, const QString &dst, CopyCtx &ctx)
             return false;
     }
     QFile::setPermissions(dst, fi.permissions());
+    cleanup.dismiss();
     return true;
 }
 
@@ -305,10 +322,8 @@ bool placeItem(const QString &src, const QString &dst, bool move, CopyCtx &ctx, 
         steps.append({UndoStep::Moved, src, dst});
         return true;
     }
-    if (!copyTree(src, dst, ctx)) {
-        removeTree(dst); // половинчатую копию не оставляем
+    if (!copyTree(src, dst, ctx))
         return false;
-    }
     if (move && !removeTree(src)) {
         steps.append({UndoStep::Created, dst, src});
         ctx.error = QCoreApplication::translate("FileOps", "Скопировано, но не удалось удалить исходник %1").arg(src);
@@ -386,6 +401,53 @@ void placeAll(const QStringList &sources, const QString &dest, bool move, const 
 
 // Откат одного шага; restored — где оказалось возвращённое, inverse — шаги,
 // которые откатят сам откат (для повтора), в порядке выполнения
+bool renameWithoutReplace(const QString &from, const QString &to)
+{
+    return ::renameat2(AT_FDCWD, QFile::encodeName(from).constData(), AT_FDCWD,
+                       QFile::encodeName(to).constData(), RENAME_NOREPLACE) == 0;
+}
+
+QString renameBatch(const QList<UndoStep> &moves, const std::atomic_bool &cancel, bool &cancelled)
+{
+    struct Staged { QString from, to, temp; bool applied = false; };
+    QList<Staged> staged;
+    QHash<QString, QString> scratch;
+    QString error;
+    for (const auto &move : moves) {
+        if (cancel.load()) break;
+        const QString parent = parentOf(move.from);
+        if (!scratch.contains(parent)) {
+            QTemporaryDir dir(parent + QStringLiteral("/.shelf-rename-XXXXXX"));
+            if (!dir.isValid()) { error = FileOps::tr("Не удалось подготовить переименование"); break; }
+            dir.setAutoRemove(false);
+            scratch.insert(parent, dir.path());
+        }
+        const QString temp = scratch.value(parent) + QLatin1Char('/') + QString::number(staged.size());
+        if (!renameWithoutReplace(move.from, temp)) { error = FileOps::tr("Не удалось переименовать"); break; }
+        staged.append({move.from, move.to, temp});
+    }
+    if (error.isEmpty()) {
+        for (auto &entry : staged) {
+            if (cancel.load()) break;
+            entry.applied = renameWithoutReplace(entry.temp, entry.to);
+            if (!entry.applied) { error = FileOps::tr("Не удалось переименовать"); break; }
+        }
+    }
+    cancelled = cancel.load();
+    if (!error.isEmpty() || cancelled) {
+        for (auto &entry : staged) {
+            if (entry.applied && !renameWithoutReplace(entry.to, entry.temp))
+                error = FileOps::tr("Не удалось полностью вернуть имена");
+        }
+        for (const auto &entry : std::as_const(staged)) {
+            if (present(entry.temp) && !renameWithoutReplace(entry.temp, entry.from))
+                error = FileOps::tr("Файлы для восстановления остались в %1").arg(parentOf(entry.temp));
+        }
+    }
+    for (const auto &path : std::as_const(scratch)) QDir().rmdir(path);
+    return error;
+}
+
 bool undoStep(const UndoStep &st, CopyCtx &ctx, QStringList &restored, QList<UndoStep> &inverse)
 {
     const auto putBack = [&](const QString &from, const QString &to, bool trashed) {
@@ -396,10 +458,8 @@ bool undoStep(const UndoStep &st, CopyCtx &ctx, QStringList &restored, QList<Und
         const QString target = present(to) ? uniquePath(parentOf(to), QFileInfo(to).fileName(), realDir(fi)) : to;
         if (!QDir().rename(from, target)) {
             // Перемещали между дисками — возвращаем так же, копией
-            if (trashed || !copyTree(from, target, ctx)) {
-                removeTree(target);
+            if (trashed || !copyTree(from, target, ctx))
                 return false;
-            }
             removeTree(from);
         }
         if (trashed)
@@ -441,10 +501,8 @@ bool undoStep(const UndoStep &st, CopyCtx &ctx, QStringList &restored, QList<Und
             return false;
         const QFileInfo fi(st.to);
         const QString target = present(st.from) ? uniquePath(parentOf(st.from), QFileInfo(st.from).fileName(), realDir(fi)) : st.from;
-        if (!copyTree(st.to, target, ctx)) {
-            removeTree(target);
+        if (!copyTree(st.to, target, ctx))
             return false;
-        }
         restored << target;
         inverse.append({UndoStep::Created, target, st.to});
         return true;
@@ -470,6 +528,7 @@ FileOps::FileOps(QObject *parent)
 
 FileOps::~FileOps()
 {
+    for (auto *task : std::as_const(m_infoTasks)) task->cancel();
     if (m_cancel)
         m_cancel->store(true);
     m_job.waitForFinished();
@@ -486,6 +545,7 @@ void FileOps::openTerminal(const QString &dir)
 
 QString FileOps::trash(const QStringList &paths)
 {
+    if (std::any_of(paths.cbegin(), paths.cend(), isRemotePath)) return tr("Корзина для сетевых папок недоступна");
     QStringList failed, done;
     QList<UndoStep> steps;
     for (const QString &p : paths) {
@@ -605,8 +665,105 @@ QString FileOps::rename(const QString &path, const QString &newName)
         return tr("«%1» уже есть").arg(name);
     if (!QDir().rename(path, target))
         return tr("Не удалось переименовать");
-    record(QStringLiteral("rename"), tr("переименование «%1»").arg(fi.fileName()), {{UndoStep::Moved, path, target}});
+    if (!m_undo.isEmpty() && m_undo.last().kind == QLatin1String("create") && m_undo.last().steps.first().from == path) {
+        m_undo.last().steps.first().from = target;
+        m_undo.last().label = tr("создание файла «%1»").arg(name);
+        emit undoChanged();
+    } else {
+        record(QStringLiteral("rename"), tr("переименование «%1»").arg(fi.fileName()), {{UndoStep::Moved, path, target}});
+    }
     return {};
+}
+
+QVariantList FileOps::renamePreview(const QStringList &paths, const QVariantMap &options) const
+{
+    const QString mode = options.value("mode").toString();
+    const QString pattern = options.value("pattern").toString();
+    const QString replacement = options.value("replacement").toString();
+    const bool regex = options.value("regex").toBool();
+    const QRegularExpression expression(regex ? pattern : QRegularExpression::escape(pattern));
+    const bool keepExtension = options.value("keepExtension", true).toBool();
+    qint64 number = options.value("start", 1).toInt();
+    const int step = options.value("step", 1).toInt();
+    const int digits = qBound(1, options.value("digits", 2).toInt(), 12);
+    const QSet<QString> originals(paths.begin(), paths.end());
+    QHash<QString, int> destinations;
+    QVariantList result;
+    for (const QString &path : paths) {
+        const QFileInfo file(path);
+        QString name = file.fileName();
+        QString extension;
+        if (keepExtension && !file.isDir() && !file.suffix().isEmpty() && file.suffix() != name.mid(1)) {
+            extension = QLatin1Char('.') + file.suffix();
+            name.chop(extension.size());
+        }
+        QString error;
+        if (mode == QLatin1String("replace")) {
+            if (!expression.isValid()) error = tr("Введите корректный шаблон поиска");
+            else if (!pattern.isEmpty() && regex) name.replace(expression, replacement);
+            else if (!pattern.isEmpty()) name.replace(pattern, replacement);
+        } else if (mode == QLatin1String("affix")) {
+            name = pattern + name + replacement;
+        } else if (mode == QLatin1String("number")) {
+            name = pattern + QStringLiteral("%1").arg(number, digits, 10, QLatin1Char('0')) + replacement;
+            number += step;
+        } else if (mode == QLatin1String("upper")) {
+            name = name.toUpper();
+        } else if (mode == QLatin1String("lower")) {
+            name = name.toLower();
+        } else if (mode == QLatin1String("date")) {
+            name += QLatin1Char('-') + file.lastModified().date().toString(Qt::ISODate);
+        }
+        name += extension;
+        const QString target = QDir(file.absolutePath()).filePath(name);
+        if (name.isEmpty() || name == "." || name == ".." || name.contains(QLatin1Char('/'))
+            || name.contains(QChar(u'\0')) || QFile::encodeName(name).size() > 255) error = tr("Недопустимое имя");
+        if (!present(path)) error = tr("Файл больше не существует");
+        if (path != target && present(target) && !originals.contains(target)) error = tr("«%1» уже есть").arg(name);
+        QString ancestor = file.absolutePath();
+        while (ancestor != QLatin1String("/")) {
+            if (originals.contains(ancestor)) { error = tr("Файл и его папку нельзя переименовать вместе"); break; }
+            ancestor = parentOf(ancestor);
+        }
+        ++destinations[target];
+        result.append(QVariantMap{{"from", path}, {"to", target}, {"before", file.fileName()}, {"after", name}, {"error", error}});
+    }
+    for (auto &value : result) {
+        auto row = value.toMap();
+        if (destinations.value(row.value("to").toString()) > 1) {
+            row["error"] = tr("Одинаковые итоговые имена");
+            value = row;
+        }
+    }
+    return result;
+}
+
+void FileOps::renameMany(const QStringList &paths, const QVariantMap &options)
+{
+    if (!startJob(tr("Переименование…"))) return;
+    const auto cancel = m_cancel;
+    m_job = QtConcurrent::run([this, paths, options, cancel] {
+        const auto preview = renamePreview(paths, options);
+        QList<UndoStep> moves;
+        QStringList renamed;
+        QString error;
+        for (const auto &value : preview) {
+            const auto row = value.toMap();
+            error = row.value("error").toString();
+            if (!error.isEmpty()) break;
+            const QString from = row.value("from").toString(), to = row.value("to").toString();
+            if (from == to) continue;
+            renamed << to;
+            moves.append({UndoStep::Moved, from, to});
+        }
+        bool cancelled = false;
+        if (error.isEmpty()) error = renameBatch(moves, *cancel, cancelled);
+        QMetaObject::invokeMethod(this, [this, moves, renamed, error, cancelled] {
+            if (error.isEmpty() && !cancelled)
+                record(QStringLiteral("rename-many"), tr("пакетное переименование"), moves);
+            finishJob(error.isEmpty() && !cancelled ? renamed : QStringList{}, error, cancelled);
+        }, Qt::QueuedConnection);
+    });
 }
 
 QString FileOps::makeDir(const QString &dir, const QString &baseName)
@@ -615,6 +772,31 @@ QString FileOps::makeDir(const QString &dir, const QString &baseName)
     if (!QDir().mkdir(target))
         return {};
     record(QStringLiteral("mkdir"), tr("создание папки «%1»").arg(QFileInfo(target).fileName()), {{UndoStep::MadeDir, target, {}}});
+    return target;
+}
+
+QStringList FileOps::templates() const
+{
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::TemplatesLocation);
+    if (path.isEmpty() || path == QDir::homePath()) return {};
+    QStringList files;
+    for (const auto &entry : QDir(path).entryInfoList(QDir::Files | QDir::Readable | QDir::NoSymLinks, QDir::Name))
+        files << entry.absoluteFilePath();
+    return files;
+}
+
+QString FileOps::newFile(const QString &dir, const QString &name, const QString &source)
+{
+    if (m_busy || name.isEmpty() || name.contains(QLatin1Char('/')) || name == "." || name == "..") return {};
+    const QString target = uniquePath(dir, name, false);
+    if (source.isEmpty()) {
+        QFile file(target);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) return {};
+    } else if (!QFile::copy(source, target)) {
+        return {};
+    }
+    record(QStringLiteral("create"), tr("создание файла «%1»").arg(QFileInfo(target).fileName()),
+           {{UndoStep::Restored, target, {}}});
     return target;
 }
 
@@ -669,7 +851,7 @@ QStringList FileOps::clipboardPaths()
     return m_clipFiles;
 }
 
-QVariantList FileOps::conflicts(const QStringList &sources, const QString &destDir) const
+QVariantList FileOps::conflicts(const QStringList &sources, const QString &destDir)
 {
     const QString dest = QDir::cleanPath(destDir);
     const auto describe = [](const QFileInfo &fi) {
@@ -704,6 +886,31 @@ QVariantList FileOps::conflicts(const QStringList &sources, const QString &destD
         };
     }
     return res;
+}
+
+int FileOps::requestConflicts(const QStringList &sources, const QString &destDir)
+{
+    const int request = ++m_infoSerial;
+    auto *watcher = new QFutureWatcher<QVariantList>(this);
+    m_conflictTasks.insert(request, watcher);
+    connect(watcher, &QFutureWatcher<QVariantList>::finished, this, [this, watcher, request] {
+        m_conflictTasks.remove(request);
+        emit conflictsReady(request, watcher->result());
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run([sources, destDir] { return conflicts(sources, destDir); }));
+    return request;
+}
+
+void FileOps::cancelConflicts(int request)
+{
+    if (auto *watcher = m_conflictTasks.take(request)) watcher->deleteLater();
+}
+
+void FileOps::consumeCut(const QStringList &paths)
+{
+    readClipboard();
+    if (m_clipCut && m_clipFiles == paths) QGuiApplication::clipboard()->clear();
 }
 
 void FileOps::paste(const QString &destDir, const QVariantMap &resolutions)
@@ -778,7 +985,7 @@ QStringList FileOps::undoTargets() const
     if (m_undo.isEmpty())
         return res;
     for (const UndoStep &st : m_undo.last().steps)
-        if (st.kind == UndoStep::Created)
+        if (st.kind == UndoStep::Created || st.kind == UndoStep::Restored)
             res << st.from;
         else if (st.kind == UndoStep::Moved)
             res << st.to;
@@ -812,6 +1019,25 @@ void FileOps::rollBack(bool redo)
 
     auto cancel = m_cancel;
     m_job = QtConcurrent::run([this, entry, cancel, text, redo] {
+        if (entry.kind == QLatin1String("rename-many")) {
+            QList<UndoStep> inverse;
+            QStringList restored;
+            for (const auto &step : entry.steps) {
+                inverse.append({UndoStep::Moved, step.to, step.from});
+                restored << step.from;
+            }
+            bool cancelled = false;
+            const auto error = renameBatch(inverse, *cancel, cancelled);
+            QMetaObject::invokeMethod(this, [this, entry, inverse, restored, error, cancelled, redo] {
+                const bool success = error.isEmpty() && !cancelled;
+                if (success) (redo ? m_undo : m_redo).append({entry.kind, entry.label, inverse});
+                else (redo ? m_redo : m_undo).append(entry);
+                emit undoChanged();
+                finishJob(success ? restored : QStringList{}, error, cancelled);
+                if (success) { if (redo) emit redone(entry.label); else emit undone(entry.label); }
+            }, Qt::QueuedConnection);
+            return;
+        }
         CopyCtx ctx{*cancel, 0, 0, [](const QString &) {}, {}};
         QStringList restored, failed;
         QList<UndoStep> inverse;
@@ -873,6 +1099,7 @@ QString FileOps::mimeTypeOf(const QString &path) const
 
 bool FileOps::dropMoves(const QStringList &sources, const QString &destDir) const
 {
+    if (isRemotePath(destDir) || std::any_of(sources.cbegin(), sources.cend(), isRemotePath)) return false;
     const Qt::KeyboardModifiers mods = QGuiApplication::queryKeyboardModifiers();
     if (mods & Qt::ControlModifier)
         return false;
@@ -928,47 +1155,6 @@ void FileOps::record(const QString &kind, const QString &label, const QList<Undo
     emit undoChanged();
 }
 
-QString FileOps::previewKind(const QString &path, const QString &mimeType) const
-{
-    if (QFileInfo(path).isDir())
-        return QStringLiteral("dir");
-    if (QImageReader::supportedMimeTypes().contains(mimeType.toLatin1()))
-        return QStringLiteral("image");
-    // Код, конфиги, json, скрипты — всё, что наследует text/plain
-    static const QMimeDatabase db;
-    return db.mimeTypeForName(mimeType).inherits(QStringLiteral("text/plain")) ? QStringLiteral("text")
-                                                                               : QStringLiteral("other");
-}
-
-QVariantMap FileOps::readTextPreview(const QString &path, qint64 limit)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly))
-        return {{QStringLiteral("text"), QString()}, {QStringLiteral("truncated"), false}, {QStringLiteral("binary"), false}};
-    const QByteArray data = f.read(limit);
-    const bool truncated = !f.atEnd();
-    if (data.contains('\0'))
-        return {{QStringLiteral("text"), QString()}, {QStringLiteral("truncated"), truncated}, {QStringLiteral("binary"), true}};
-    // Без flush: оборванный на границе многобайтный символ остаётся в декодере, а не становится «�»
-    QStringDecoder utf8(QStringDecoder::Utf8);
-    const QString text = utf8(data);
-    return {{QStringLiteral("text"), text}, {QStringLiteral("truncated"), truncated}, {QStringLiteral("binary"), false}};
-}
-
-void FileOps::requestTextPreview(const QString &path)
-{
-    // Файл может быть на медленном диске или в сети — не держим интерфейс
-    QPointer<FileOps> self(this);
-    (void)QtConcurrent::run([self, path] {
-        const QVariantMap r = readTextPreview(path);
-        QMetaObject::invokeMethod(qApp, [self, path, r] {
-            if (self)
-                emit self->textPreview(path, r.value(QStringLiteral("text")).toString(),
-                                       r.value(QStringLiteral("truncated")).toBool(), r.value(QStringLiteral("binary")).toBool());
-        }, Qt::QueuedConnection);
-    });
-}
-
 QString FileOps::archiver()
 {
     // bsdtar (libarchive) умеет и zip, и tar.*, и 7z; 7z — запасной
@@ -1005,7 +1191,7 @@ bool FileOps::canCompress(const QString &format) const
     return format == QLatin1String("tar.zst") && tool == QLatin1String("bsdtar");
 }
 
-void FileOps::extract(const QString &archive, const QString &destDir, bool intoFolder)
+void FileOps::extract(const QString &archive, const QString &destDir, bool intoFolder, QObject *owner)
 {
     const QString tool = archiver();
     if (tool.isEmpty()) {
@@ -1027,7 +1213,8 @@ void FileOps::extract(const QString &archive, const QString &destDir, bool intoF
     }
 
     auto cancel = m_cancel;
-    m_job = QtConcurrent::run([this, tool, archive = fi.canonicalFilePath(), size = fi.size(), name, dest, tmp, intoFolder, cancel] {
+    m_job = QtConcurrent::run([this, tool, archive = fi.canonicalFilePath(), size = fi.size(), name, dest, tmp, intoFolder, cancel,
+                               origin = QPointer<QObject>(owner), trackOrigin = owner != nullptr] {
         const bool bsd = tool.endsWith(QLatin1String("bsdtar"));
         const auto args = [&](const QString &file) {
             return bsd ? QStringList{QStringLiteral("-x"), QStringLiteral("-f"), file, QStringLiteral("-C"), tmp}
@@ -1060,7 +1247,7 @@ void FileOps::extract(const QString &archive, const QString &destDir, bool intoF
         const bool cancelled = cancel->load();
         if (!ok)
             removeTree(tmp);
-        QMetaObject::invokeMethod(this, [this, ok, error, cancelled, tmp, dest, name, intoFolder] {
+        QMetaObject::invokeMethod(this, [this, ok, error, cancelled, tmp, dest, name, intoFolder, origin, trackOrigin] {
             if (!ok) {
                 finishJob({}, error, cancelled);
                 return;
@@ -1076,13 +1263,18 @@ void FileOps::extract(const QString &archive, const QString &destDir, bool intoF
                 finishJob({target}, {}, false);
                 return;
             }
+            if (trackOrigin && !origin) {
+                (void)QtConcurrent::run([tmp] { removeTree(tmp); });
+                finishJob({}, {}, true);
+                return;
+            }
             QStringList entries;
             for (const QFileInfo &e : QDir(tmp).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System))
                 entries << e.absoluteFilePath();
             const QVariantList cs = conflicts(entries, dest);
             m_extracting.insert(tmp, name);
             finishJob({}, {}, false);
-            emit extracted(tmp, dest, cs);
+            emit extracted(tmp, dest, cs, origin);
         }, Qt::QueuedConnection);
     });
 }
@@ -1216,7 +1408,32 @@ void FileOps::finishJob(const QStringList &created, const QString &error, bool c
     emit finished(created);
 }
 
-QVariantMap FileOps::info(const QString &path)
+int FileOps::requestInfo(const QString &path)
+{
+    const int request = ++m_infoSerial;
+    auto *task = new QFutureWatcher<QVariantMap>(this);
+    m_infoTasks.insert(request, task);
+    connect(task, &QFutureWatcher<QVariantMap>::resultReadyAt, this, [this, task, request](int i) {
+        emit infoReady(request, task->resultAt(i));
+    });
+    connect(task, &QFutureWatcher<QVariantMap>::finished, this, [this, task, request] {
+        m_infoTasks.remove(request);
+        task->deleteLater();
+    });
+    task->setFuture(QtConcurrent::run([path](QPromise<QVariantMap> &promise) { readInfo(path, promise); }));
+    return request;
+}
+
+void FileOps::cancelInfo(int request)
+{
+    if (auto *task = m_infoTasks.take(request)) {
+        task->disconnect();
+        task->cancel();
+        task->deleteLater();
+    }
+}
+
+void FileOps::readInfo(const QString &path, QPromise<QVariantMap> &promise)
 {
     const QFileInfo fi(path);
     QVariantMap m;
@@ -1237,17 +1454,31 @@ QVariantMap FileOps::info(const QString &path)
     for (int i = 0; i < 9; ++i)
         perms += (p & bits[i]) ? QLatin1Char("rwx"[i % 3]) : QLatin1Char('-');
     m[QStringLiteral("permissions")] = perms;
+    const auto trashed = Trash::isTopLevel(path) ? Trash::readInfo(path) : Trash::Info{};
+    if (trashed.valid()) {
+        m[QStringLiteral("origDir")] = QFileInfo(trashed.origPath).absolutePath();
+        m[QStringLiteral("deleted")] = trashed.deleted.toString(QStringLiteral("dd.MM.yyyy HH:mm"));
+    }
 
     if (fi.isDir()) {
         m[QStringLiteral("type")] = tr("Папка");
         m[QStringLiteral("isDir")] = true;
-        // Размер папки считаем с потолком, чтобы окно не зависало на /
+        m[QStringLiteral("calculating")] = true;
+        if (!promise.addResult(m)) return;
+        QElapsedTimer progress;
+        progress.start();
         qint64 total = 0;
         int files = 0, dirs = 0;
         bool truncated = false;
         QDirIterator it(path, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System | QDir::NoSymLinks,
                         QDirIterator::Subdirectories);
-        while (it.hasNext()) {
+        auto update = [&] {
+            m[QStringLiteral("size")] = (truncated || m.value(QStringLiteral("calculating")).toBool())
+                ? tr("больше %1").arg(formatSize(total)) : formatSize(total);
+            m[QStringLiteral("contents")] = tr("%n файл(ов)", nullptr, files) + QStringLiteral(", ")
+                + tr("%n папка(ок)", nullptr, dirs);
+        };
+        while (!promise.isCanceled() && it.hasNext()) {
             const QFileInfo c = it.nextFileInfo();
             if (c.isDir())
                 ++dirs;
@@ -1259,9 +1490,14 @@ QVariantMap FileOps::info(const QString &path)
                 truncated = true;
                 break;
             }
+            if (progress.elapsed() >= 250) {
+                update();
+                if (!promise.addResult(m)) return;
+                progress.restart();
+            }
         }
-        m[QStringLiteral("size")] = truncated ? tr("больше %1").arg(formatSize(total)) : formatSize(total);
-        m[QStringLiteral("contents")] = tr("%n файл(ов)", nullptr, int(files)) + QStringLiteral(", ") + tr("%n папка(ок)", nullptr, int(dirs));
+        m.remove(QStringLiteral("calculating"));
+        update();
     } else {
         const QMimeType mt = mimeForFile(fi, QMimeDatabase());
         m[QStringLiteral("type")] = QStringLiteral("%1 (%2)").arg(mt.comment(), mt.name());
@@ -1272,5 +1508,5 @@ QVariantMap FileOps::info(const QString &path)
         const int form = bytes < 100 ? int(bytes) : int(bytes % 100) + 100;
         m[QStringLiteral("size")] = tr("%1 (%2 байт(а))", nullptr, form).arg(formatSize(bytes), QLocale().toString(bytes));
     }
-    return m;
+    if (!promise.isCanceled()) promise.addResult(std::move(m));
 }

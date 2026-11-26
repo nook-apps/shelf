@@ -55,12 +55,17 @@ Wayland-приложение со своим `app_id` и `.desktop` (его мо
   в меню сортировки отдельно выбираются признак и порядок (например, сначала новые или старые);
   папки сверху можно отключить в настройках. Сброс вида — в меню папки, отключение запоминания — в настройках.
   Окна выбора файлов используют сохранённый вид, но не меняют его.
-- **Быстрый просмотр** — <kbd>Space</kbd>: картинка, начало текста или кода, миниатюра PDF и видео,
-  для остального — значок и сведения; стрелки листают соседние файлы, <kbd>Enter</kbd> открывает
+- **Быстрый просмотр** — <kbd>Space</kbd>: картинка, начало текста или кода, первая страница PDF и офисных документов,
+  миниатюра видео, значок и сведения; стрелки листают соседние файлы, <kbd>Enter</kbd> открывает
 - **Выделение** — <kbd>Ctrl</kbd>/<kbd>Shift</kbd>-клик и рамка: потянуть мышью с пустого места
   (с <kbd>Ctrl</kbd> — добавить к выделенному); у края окна список прокручивается сам
 - **Вкладки** — у каждой своя папка, история и поиск; перетаскиваются мышью, средняя кнопка
-  открывает папку в новой вкладке. После выключения компьютера или сбоя Shelf предложит вернуть вкладки
+  открывает папку в новой вкладке. После сбоя Shelf предлагает вернуть вкладки и их вторые панели.
+- **Две панели** — <kbd>F3</kbd>, с отдельной историей и видом. <kbd>Tab</kbd> переключает активную панель.
+- **Поиск** — фильтры по типу, размеру, дате и вложенности. В списке или сетке набор имени сразу выделяет совпадение.
+- **Новые файлы** — пустой файл или копия из папки шаблонов XDG. <kbd>F2</kbd> для нескольких файлов открывает пакетное переименование.
+- **Сеть** — SMB, SFTP и MTP через GVfs. Адрес можно ввести в адресной строке. В боковой панели доступны сетевые закладки GTK и устройства.
+- **Окна** — <kbd>Ctrl</kbd>+<kbd>N</kbd> открывает окно в общем процессе Shelf. В настройках можно оставить процесс в фоне и выбрать, где открывать запросы D-Bus. `shelf --select путь` выделяет объект, `shelf --quit` завершает процесс.
 - **Перетаскивание** — внутри окна, между вкладками и в другие программы (браузер, мессенджер,
   терминал) и обратно; подержать файлы над папкой — она откроется
 - **Боковая панель** — XDG-папки, закладки GTK (общие с Thunar и Nautilus), диски и флешки, корзина
@@ -126,7 +131,7 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 | <kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd> | Сетка / список |
 | <kbd>Ctrl</kbd>+колесо, <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd> | Крупнее / мельче / обычный размер значков |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Изменить направление сортировки |
-| <kbd>F2</kbd> | Переименовать |
+| <kbd>F2</kbd> | Переименовать один файл или выделенную пачку |
 | <kbd>Delete</kbd> | В корзину |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> | Копировать / вырезать / вставить |
 | <kbd>Space</kbd> | Быстрый просмотр (стрелки — соседние файлы, <kbd>Space</kbd>/<kbd>Esc</kbd> — закрыть) |
@@ -135,6 +140,10 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> | Новая папка |
 | <kbd>Ctrl</kbd>+<kbd>D</kbd> | В закладки |
 | <kbd>Alt</kbd>+<kbd>Enter</kbd> | Свойства |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> | Создать пустой файл |
+| <kbd>F3</kbd> / <kbd>Tab</kbd> | Включить две панели / переключить панель |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> / <kbd>M</kbd> | Копировать / переместить в другую панель |
+| <kbd>Ctrl</kbd>+<kbd>N</kbd> | Новое окно |
 | <kbd>F4</kbd> | Терминал в текущей папке |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>W</kbd> | Новая вкладка / закрыть вкладку |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Следующая / предыдущая вкладка |
@@ -150,7 +159,7 @@ sudo install -Dm644 ~/.local/share/xdg-desktop-portal/portals/shelf.portal \
 **Fedora 43 и новее** — готовый пакет на странице [выпусков](https://github.com/nook-apps/shelf/releases):
 
 ```sh
-sudo dnf install ./shelf-0.5.3-1.fc43.x86_64.rpm
+sudo dnf install ./shelf-0.6.0-1.fc43.x86_64.rpm
 ```
 
 Пакету нужен Qt 6.10 или новее, поэтому он ставится и на следующие выпуски Fedora.
@@ -158,13 +167,13 @@ sudo dnf install ./shelf-0.5.3-1.fc43.x86_64.rpm
 **Debian 13, Ubuntu 25.04 и новее** — `.deb` на странице выпусков:
 
 ```sh
-sudo apt install ./shelf_0.5.3_amd64.deb
+sudo apt install ./shelf_0.6.0_amd64.deb
 ```
 
 **Arch Linux** — готовый пакет на странице выпусков или сборка из `PKGBUILD`:
 
 ```sh
-sudo pacman -U ./shelf-fm-0.5.3-1-x86_64.pkg.tar.zst
+sudo pacman -U ./shelf-fm-0.6.0-1-x86_64.pkg.tar.zst
 # или
 git clone https://github.com/nook-apps/shelf && cd shelf/packaging/arch && makepkg -si
 ```
@@ -201,13 +210,13 @@ nix run --impure github:nix-community/nixGL -- nix run github:nook-apps/shelf
 
 ## 🔧 Сборка из исходников
 
-Для сборки нужны Qt ≥ 6.7 (Base, Declarative, Svg), CMake ≥ 3.21, Ninja и компилятор с C++20.
+Для сборки нужны Qt ≥ 6.7 (Base, Declarative, Svg), GLib с GIO, pkg-config, CMake ≥ 3.21, Ninja и компилятор с C++20.
 
 ```sh
 # Fedora
-sudo dnf install qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg cmake ninja-build gcc-c++
+sudo dnf install qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg glib2-devel pkgconf-pkg-config cmake ninja-build gcc-c++
 # Arch
-sudo pacman -S qt6-base qt6-declarative qt6-svg cmake ninja
+sudo pacman -S qt6-base qt6-declarative qt6-svg glib2 pkgconf cmake ninja
 
 cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX=~/.local
 cmake --build build
@@ -221,6 +230,8 @@ cmake --install build
 | `gio` (glib2), `xdg-utils` | открывать файлы и запускать программы | да |
 | терминал | «Открыть в терминале»: kitty, foot, alacritty, wezterm, ghostty, konsole, gnome-terminal или `xdg-terminal-exec` | желательно |
 | [tumbler](https://docs.xfce.org/xfce/tumbler/start) | миниатюры картинок и PDF; без него — только уже готовые из кэша | нет |
+| `pdftoppm` (Poppler), `soffice` (LibreOffice) | первая страница PDF и офисных документов | нет |
+| GVfs с FUSE и модулями SMB/MTP | сетевые папки и телефоны. На NixOS включите `services.gvfs.enable` | нет |
 | `ffmpegthumbnailer` | миниатюры видео (через tumbler) | нет |
 | `bsdtar` (libarchive) или `7z` | распаковка и сжатие архивов; tar.zst — только с bsdtar | нет |
 | [matugen](https://github.com/InioX/matugen) | палитра Material из обоев (без него Shelf считает свою, попроще) | нет |

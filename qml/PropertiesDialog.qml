@@ -7,11 +7,19 @@ GlassDialog {
 
     property var info: ({})
     property string icon: ""
+    property int request: 0
 
     function showFor(path, iconName) {
-        info = Object.assign(FileOps.info(path), FileOps.trashInfo(path))
+        FileOps.cancelInfo(request)
+        info = { name: path.substring(path.lastIndexOf("/") + 1) || path, calculating: true }
         icon = iconName
+        request = FileOps.requestInfo(path)
         open()
+    }
+    onAboutToHide: { FileOps.cancelInfo(request); request = 0 }
+    Connections {
+        target: FileOps
+        function onInfoReady(id, result) { if (id === dlg.request) dlg.info = result }
     }
 
     padding: 20
@@ -19,7 +27,7 @@ GlassDialog {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     readonly property var rows: [
-        [qsTr("Тип"), info.type], [qsTr("Размер"), info.size], [qsTr("Содержимое"), info.contents],
+        [qsTr("Тип"), info.type], [qsTr("Размер"), info.size || (info.calculating ? qsTr("Подсчёт…") : "")], [qsTr("Содержимое"), info.contents],
         [info.origDir ? qsTr("Откуда") : qsTr("Где"), (info.origDir || info.dir || "").replace(/^\/home\/[^/]+/, "~")],
         [qsTr("Удалён"), info.deleted], [qsTr("Ссылка на"), info.link],
         [qsTr("Изменён"), info.modified], [qsTr("Владелец"), info.owner], [qsTr("Права"), info.permissions]

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFuture>
+#include <QFutureWatcher>
 #include <QHash>
 #include <QObject>
 #include <QStringList>
@@ -75,15 +76,22 @@ public:
     Q_INVOKABLE void emptyTrash();
     Q_INVOKABLE QVariantMap trashInfo(const QString &path);
     Q_INVOKABLE QString rename(const QString &path, const QString &newName);
+    Q_INVOKABLE QVariantList renamePreview(const QStringList &paths, const QVariantMap &options) const;
+    Q_INVOKABLE void renameMany(const QStringList &paths, const QVariantMap &options);
     // Новая папка с уникальным именем; возвращает её путь или пустую строку
     Q_INVOKABLE QString makeDir(const QString &dir, const QString &baseName);
+    Q_INVOKABLE QStringList templates() const;
+    Q_INVOKABLE QString newFile(const QString &dir, const QString &name, const QString &source = {});
 
     Q_INVOKABLE void copyToClipboard(const QStringList &paths, bool cut);
     Q_INVOKABLE void copyText(const QString &text);
     Q_INVOKABLE QStringList clipboardPaths();
     // Что из sources уже есть в destDir — для вопроса перед переносом:
     // [{ name, isDir, merge, canReplace, srcInfo, dstInfo, newer: "src" | "dst" | "" }]
-    Q_INVOKABLE QVariantList conflicts(const QStringList &sources, const QString &destDir) const;
+    static QVariantList conflicts(const QStringList &sources, const QString &destDir);
+    Q_INVOKABLE int requestConflicts(const QStringList &sources, const QString &destDir);
+    Q_INVOKABLE void cancelConflicts(int request);
+    Q_INVOKABLE void consumeCut(const QStringList &paths);
     // resolutions: имя → "replace" | "skip" | "keep". Без ответа — «keep»: рядом, с « (2)».
     // replace: файл — заменить (старый уходит в корзину), папку — объединить с папкой
     Q_INVOKABLE void paste(const QString &destDir, const QVariantMap &resolutions = {});
@@ -104,7 +112,8 @@ public:
     // Что исчезнет при undo(): копии и перенесённое (для анимации «вылетают из папки»)
     Q_INVOKABLE QStringList undoTargets() const;
 
-    Q_INVOKABLE QVariantMap info(const QString &path);
+    Q_INVOKABLE int requestInfo(const QString &path);
+    Q_INVOKABLE void cancelInfo(int request);
 
     // ── Архивы ──
     // Архив ли это (по MIME-типу) и есть ли чем его распаковать
@@ -113,7 +122,7 @@ public:
     Q_INVOKABLE bool canCompress(const QString &format) const;
     // В фоне. intoFolder — в новую папку с именем архива; иначе сюда: сначала во временную
     // папку рядом, потом сигнал extracted — с вопросом о совпадениях имён, как при переносе
-    Q_INVOKABLE void extract(const QString &archive, const QString &destDir, bool intoFolder);
+    Q_INVOKABLE void extract(const QString &archive, const QString &destDir, bool intoFolder, QObject *owner = nullptr);
     // Второй шаг «распаковать сюда»: из временной папки в destDir (resolutions — как у transfer)
     Q_INVOKABLE void placeExtracted(const QString &tmpDir, const QString &destDir, const QVariantMap &resolutions = {});
     // Передумали на вопросе о совпадениях — убрать временную папку
@@ -122,13 +131,6 @@ public:
     Q_INVOKABLE void compress(const QStringList &paths, const QString &format);
     // «отчёт.tar.gz» → «отчёт»
     Q_INVOKABLE static QString archiveBaseName(const QString &fileName);
-
-    // Быстрый просмотр (Space): как показать файл — "image", "text", "dir" или "other"
-    Q_INVOKABLE QString previewKind(const QString &path, const QString &mimeType) const;
-    // Начало текстового файла — в фоне, ответ сигналом textPreview
-    Q_INVOKABLE void requestTextPreview(const QString &path);
-    // Первые limit байт как текст: { text, truncated, binary }
-    static QVariantMap readTextPreview(const QString &path, qint64 limit = 64 * 1024);
 
 signals:
     void busyChanged();
@@ -143,12 +145,13 @@ signals:
     // Повтор закончился без ошибок
     void redone(const QString &label);
     // Распаковано во временную папку tmpDir; conflicts — как у conflicts(), пусто — можно класть
-    void extracted(const QString &tmpDir, const QString &destDir, const QVariantList &conflicts);
-    // Ответ на requestTextPreview; binary — внутри нули, это не текст
-    void textPreview(const QString &path, const QString &text, bool truncated, bool binary);
+    void extracted(const QString &tmpDir, const QString &destDir, const QVariantList &conflicts, QObject *owner);
+    void infoReady(int request, const QVariantMap &info);
+    void conflictsReady(int request, const QVariantList &conflicts);
 
 private:
     void readClipboard();
+    static void readInfo(const QString &path, QPromise<QVariantMap> &promise);
     void setProgress(double p, const QString &text);
     void removeInBackground(const QStringList &paths, const QString &text);
     void finishJob(const QStringList &created, const QString &error, bool cancelled);
@@ -175,4 +178,7 @@ private:
     bool m_clipCut = false;
     std::shared_ptr<std::atomic_bool> m_cancel;
     QFuture<void> m_job;
+    int m_infoSerial = 0;
+    QHash<int, QFutureWatcher<QVariantMap> *> m_infoTasks;
+    QHash<int, QFutureWatcher<QVariantList> *> m_conflictTasks;
 };

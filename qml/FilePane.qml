@@ -27,6 +27,10 @@ FocusScope {
                 view.contentY = bottom - view.height
         }
     }
+    function scrollBy(delta: real) {
+        const maxY = Math.max(view.originY, view.originY + view.contentHeight - view.height)
+        view.contentY = Math.max(view.originY, Math.min(view.contentY + delta, maxY))
+    }
     function verticalTarget(file, delta) {
         if (!grouped) return file + delta * groupedModel.columns
         var slot = visualIndex(file), cols = groupedModel.columns
@@ -108,7 +112,15 @@ FocusScope {
     signal contextMenuRequested(int row, real x, real y)   // row = -1 — пустое место
     // blur — поле закрыли кликом мимо: фокус уже у того, куда щёлкнули, не забираем его
     signal renameRequested(string path, string newName, bool blur)
-    signal typed(string text)
+    property string typedPrefix: ""
+    readonly property bool typing: typedPrefix !== "" && view.activeFocus
+    Timer { id: prefixTimeout; interval: 1000; onTriggered: pane.typedPrefix = "" }
+    function typeAhead(prefix) {
+        typedPrefix = prefix
+        prefixTimeout.restart()
+        const row = model.indexOfPrefix(prefix)
+        if (prefix && row >= 0) selectRow(row)
+    }
     signal quickLookRequested(int row)  // Space — быстрый просмотр
     signal filesDropped(var paths, string dest, bool move)
     signal springOpen(string path)   // держали файлы над папкой — открыть её
@@ -117,10 +129,20 @@ FocusScope {
     // ── Перетаскивание ───────────────────────────────────────────────
     property var dragPaths: []
     property string dropFolder: ""   // папка под курсором, куда упадут файлы
+    property DropArea hoveredDropArea: null
+    Timer {
+        interval: 900
+        running: pane.dropFolder !== "" && (pane.hoveredDropArea?.containsDrag ?? false)
+        onTriggered: {
+            const folder = pane.dropFolder
+            pane.dropFolder = ""
+            pane.springOpen(folder)
+        }
+    }
     onGroupedChanged: dropFolder = ""
     Connections {
         target: pane.model
-        function onPathChanged() { pane.dropFolder = "" }
+        function onPathChanged() { pane.dropFolder = ""; pane.typedPrefix = "" }
     }
     readonly property bool dropBlocked: model.path.startsWith(Places.trashPath + "/")
 
@@ -270,7 +292,11 @@ FocusScope {
         }
         if (changed) selected = s
         if (currentRow >= model.count) view.currentIndex = visualIndex(model.count - 1)
-        if (cursorPath && model.indexOfPath(cursorPath) < 0) cursorPath = ""
+        if (cursorPath) {
+            const row = model.indexOfPath(cursorPath)
+            if (row < 0) cursorPath = ""
+            else view.currentIndex = visualIndex(row)
+        }
     }
     function focusView() { view.forceActiveFocus() }
     // Клик мимо поля переименования — как Enter. Сам по себе фокус не уйдёт: поле внутри
@@ -454,6 +480,7 @@ FocusScope {
 
     GridView {
         id: view
+        objectName: "fileView"
         transform: Translate { id: viewShift }
 
         // Новые файлы проявляются и подрастают, удалённые гаснут, соседи плавно уступают место
@@ -475,6 +502,7 @@ FocusScope {
         anchors.leftMargin: 8
         clip: true
         focus: true
+        onActiveFocusChanged: if (!activeFocus) pane.typedPrefix = ""
         model: pane.grouped ? groupedModel : pane.model
         // Мышью не «тащим» список, как на телефоне — только колесо/тачпад
         interactive: false
@@ -491,7 +519,7 @@ FocusScope {
             ? Math.floor((width - 14) / Math.max(1, Math.floor((width - 14) / gridCell)))
             : width - 14
         cellHeight: pane.gridMode ? (pane.grouped ? 40 : pane.cellIcon + 62) : 30
-        cacheBuffer: pane.grouped && pane.gridMode ? pane.cellIcon + 62 : 0
+        cacheBuffer: !pane.visible || !pane.gridMode ? 0 : pane.grouped ? pane.cellIcon + 62 : view.cellHeight * 2
 
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
@@ -517,8 +545,7 @@ FocusScope {
                 }
                 zoomAcc = 0
                 var d = ev.pixelDelta.y !== 0 ? ev.pixelDelta.y : ev.angleDelta.y / 120 * 90
-                var maxY = Math.max(view.originY, view.originY + view.contentHeight - view.height)
-                view.contentY = Math.max(view.originY, Math.min(view.contentY - d, maxY))
+                pane.scrollBy(-d)
             }
         }
 
@@ -543,13 +570,19 @@ FocusScope {
                 e.accepted = true
                 return
             case Qt.Key_Space:
-                if (cur >= 0) pane.quickLookRequested(cur)
+                if (pane.typing) pane.typeAhead(pane.typedPrefix + " ")
+                else if (cur >= 0) pane.quickLookRequested(cur)
+                e.accepted = true
+                return
+            case Qt.Key_Backspace:
+                if (!pane.typing) return
+                pane.typeAhead(pane.typedPrefix.slice(0, -1))
                 e.accepted = true
                 return
             default:
                 if (e.text.length === 1 && e.text.charCodeAt(0) > 32 && e.text.charCodeAt(0) !== 127
                         && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
-                    pane.typed(e.text)
+                    pane.typeAhead(pane.typedPrefix + e.text)
                     e.accepted = true
                 }
                 return
@@ -605,8 +638,13 @@ FocusScope {
             property real appear: 1
             opacity: (isHidden ? 0.6 : 1.0) * appear
             // Делегаты переиспользуются: возвращаем то, что могла оставить анимация удаления
-            GridView.onReused: { appear = 1; scale = 1; glideAnim.stop(); glide.x = 0; glide.y = 0 }
-            GridView.onPooled: { glideAnim.stop(); glide.x = 0; glide.y = 0 }
+            property bool pooled: false
+            GridView.onReused: { pooled = false; appear = 1; scale = 1; glideAnim.stop(); glide.x = 0; glide.y = 0 }
+            GridView.onPooled: {
+                pooled = true
+                if (pane.dropFolder === cell.path) pane.dropFolder = ""
+                glideAnim.stop(); glide.x = 0; glide.y = 0
+            }
 
             // Зум: с прежнего места на экране (from) на новое; кого раньше не было видно — проявляется
             transform: Translate { id: glide }
@@ -704,18 +742,23 @@ FocusScope {
                             mimeType: cell.mimeType
                             fileName: cell.name
                         }
+                        ThumbnailSource {
+                            id: thumb
+                            path: cell.path
+                            mime: cell.mimeType
+                            size: pane.gridMode ? pane.iconSize : 22
+                            mtime: cell.mtime
+                            enabled: !cell.pooled && pane.visible && cell.y + cell.height > view.contentY
+                                && cell.y < view.contentY + view.height
+                        }
                         Loader {
                             id: thumbLoader
-                            // revision и mtime — чтобы перечитать, когда tumbler закончит или файл изменится.
-                            // Они в самом выражении: голые строки-зависимости компилятор QML выбрасывает
-                            readonly property string src: Thumbnailer.revision < 0 || cell.mtime < 0
-                                ? "" : Thumbnailer.thumbnail(cell.path, cell.mimeType, pane.gridMode ? pane.iconSize : 22)
-                            active: src !== ""
+                            active: thumb.source !== ""
                             sourceComponent: Thumbnail {
                                 size: iconBox.size
                                 renderSize: iconBox.renderSize
                                 video: cell.mimeType.startsWith("video/")
-                                source: thumbLoader.src
+                                source: thumb.source
                             }
                         }
                     }
@@ -848,21 +891,13 @@ FocusScope {
                 enabled: cell.isDir
                 onEntered: (drag) => {
                     drag.accepted = pane.acceptsDrop(drag, cell.path)
-                    if (drag.accepted) pane.dropFolder = cell.path
+                    if (drag.accepted) { pane.hoveredDropArea = folderDrop; pane.dropFolder = cell.path }
                 }
                 onExited: if (pane.dropFolder === cell.path) pane.dropFolder = ""
                 onDropped: (drop) => {
+                    if (pane.dropFolder === cell.path) pane.dropFolder = ""
                     const dropped = pane.handleDrop(drop, cell.path)
                     if (cell.folder) cell.folder.swallow(dropped)
-                }
-                Timer {
-                    interval: 900
-                    running: cell.dropHere && folderDrop.containsDrag
-                    onTriggered: {
-                        if (!cell.dropHere || !folderDrop.containsDrag) return
-                        pane.dropFolder = ""
-                        pane.springOpen(cell.path)
-                    }
                 }
             }
 

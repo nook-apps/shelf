@@ -6,6 +6,8 @@ Build-Depends:
  debhelper-compat (= 13),
  cmake (>= 3.21),
  ninja-build,
+ pkgconf,
+ libglib2.0-dev,
  qt6-base-dev (>= 6.7),
  qt6-declarative-dev (>= 6.7),
  qt6-base-dev-tools,
@@ -41,8 +43,12 @@ Depends:
 Recommends:
  tumbler,
  ffmpegthumbnailer,
+ poppler-utils,
+ gvfs-backends,
+ gvfs-fuse,
 # Распаковка и сжатие архивов (bsdtar)
  libarchive-tools,
+Suggests: libreoffice
 Description: glass file manager for Hyprland in Qt 6 / QML
  Shelf is a simple file manager for Hyprland styled after glassmorphism: a
  frosted-glass window blurred by the compositor, a hand-drawn glass icon set

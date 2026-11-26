@@ -13,6 +13,15 @@ Popup {
     anchors.centerIn: parent
     modal: true
     focus: true
+    palette.base: Theme.surface0
+    palette.button: Theme.surface0
+    palette.buttonText: Theme.text
+    palette.text: Theme.text
+    palette.windowText: Theme.text
+    palette.placeholderText: Theme.subtext0
+    palette.highlight: Theme.accent
+    palette.highlightedText: Theme.base
+    palette.mid: Theme.restBorder
 
     Overlay.modal: Rectangle {
         color: Qt.rgba(0, 0, 0, dlg.shade)

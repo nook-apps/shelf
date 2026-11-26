@@ -3,6 +3,8 @@
 #include "portal/FileChooser.h"
 #include <QDBusMessage>
 #include <QFile>
+#include <QDir>
+#include <QImage>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -11,6 +13,10 @@ class TestResources : public QObject
 {
     Q_OBJECT
 private slots:
+    void initTestCase()
+    {
+        qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent-shelf-test-bus");
+    }
     void archiveOutputIsBoundedAndHandlesSplitLines()
     {
         ArchiveOutput output;
@@ -28,9 +34,8 @@ private slots:
     void thumbnailCachesEvictOldEntries()
     {
         Thumbnailer t;
-        t.m_supportedLoaded = true;
         for (int i = 0; i < 5000; ++i)
-            t.thumbnail(QStringLiteral("/nonexistent-shelf-audit/%1").arg(i), "unsupported/type");
+            t.m_never.insert(QStringLiteral("/nonexistent-shelf-audit/%1").arg(i), new qint64(1));
         QCOMPARE(t.m_never.size(), 4096);
         QVERIFY(!t.m_never.contains("/nonexistent-shelf-audit/0"));
         QVERIFY(t.m_never.contains("/nonexistent-shelf-audit/4999"));
@@ -43,6 +48,29 @@ private slots:
         QCOMPARE(t.m_known.size(), 4096);
         QVERIFY(t.m_known.contains("hot"));
         QVERIFY(!t.m_known.contains("0"));
+    }
+    void thumbnailReadsCacheAsynchronouslyAndDropsOldJobs()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        Thumbnailer thumbnails;
+        thumbnails.m_cacheDir = dir.filePath("cache");
+        const QString path = dir.filePath("picture.jpg");
+        QImage image(10, 10, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        image.setText(QStringLiteral("Thumb::MTime"), QStringLiteral("42"));
+        QVERIFY(QDir().mkpath(dir.filePath("cache/normal")));
+        QVERIFY(image.save(dir.filePath("cache/normal/" + Thumbnailer::cacheName(path))));
+        thumbnails.watch(path);
+        QVERIFY(thumbnails.thumbnail(path, "image/jpeg", 48, 42).isEmpty());
+        QTRY_VERIFY(!thumbnails.thumbnail(path, "image/jpeg", 48, 42).isEmpty());
+        thumbnails.m_pending.insert("0:" + path, 42);
+        thumbnails.m_supported.insert("image/jpeg");
+        thumbnails.serviceChanged(QStringLiteral(":1.1"), {});
+        QVERIFY(thumbnails.m_pending.isEmpty());
+        QVERIFY(thumbnails.m_supported.isEmpty());
+        QVERIFY(!thumbnails.thumbnail(path, "image/jpeg", 48, 42).isEmpty());
+        thumbnails.unwatch(path);
     }
     void portalFailedStartReleasesRequest()
     {

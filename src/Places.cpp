@@ -1,6 +1,7 @@
 #include "Places.h"
 
 #include "Language.h"
+#include "Mounts.h"
 
 #include <QDir>
 #include <QFile>
@@ -8,6 +9,7 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QUrl>
+#include <QtConcurrent>
 
 #include <algorithm>
 
@@ -111,14 +113,13 @@ void Places::loadBookmarks()
         // «file:///путь Подпись» — подпись необязательна
         const int sp = line.indexOf(QLatin1Char(' '));
         const QUrl url(sp < 0 ? line : line.left(sp));
-        if (!url.isLocalFile())
-            continue; // sftp:// и т.п. — пока не умеем
-        const QString path = QDir::cleanPath(url.toLocalFile());
+        if (!url.isLocalFile() && !Mounts::remoteUrl(url.toString())) continue;
+        const QString path = url.isLocalFile() ? QDir::cleanPath(url.toLocalFile()) : url.toString(QUrl::RemovePassword);
         // Стандартные папки уже есть в «Местах» — GTK кладёт их и в закладки
         if (std::any_of(m_places.cbegin(), m_places.cend(),
                         [&path](const QVariant &v) { return v.toMap().value(QStringLiteral("path")) == path; }))
             continue;
-        const QString name = sp < 0 ? QFileInfo(path).fileName() : line.mid(sp + 1);
+        const QString name = sp < 0 ? (url.fileName().isEmpty() ? url.host() : url.fileName()) : line.mid(sp + 1);
         list << item(name, path, QStringLiteral("folder"));
     }
     if (list != m_bookmarks) {
@@ -158,32 +159,46 @@ void Places::removeBookmark(const QString &path)
     QStringList lines = bookmarkLines();
     lines.removeIf([&path](const QString &line) {
         const int sp = line.indexOf(QLatin1Char(' '));
-        return QUrl(sp < 0 ? line : line.left(sp)).toLocalFile() == path;
+        const QUrl url(sp < 0 ? line : line.left(sp));
+        return (url.isLocalFile() ? url.toLocalFile() : url.toString(QUrl::RemovePassword)) == path;
     });
     saveBookmarks(lines);
 }
 
 void Places::refreshDevices()
 {
-    QVariantList list;
-    list << item(tr("Файловая система"), QStringLiteral("/"), QStringLiteral("drive"));
-    for (const QStorageInfo &si : QStorageInfo::mountedVolumes()) {
-        const QString root = si.rootPath();
-        if (!si.isValid() || !si.isReady())
-            continue;
-        if (!(root.startsWith(QLatin1String("/run/media/")) || root.startsWith(QLatin1String("/media/"))
-              || root.startsWith(QLatin1String("/mnt/"))))
-            continue;
-        const QString name = si.displayName().isEmpty() || si.displayName() == root ? QFileInfo(root).fileName()
-                                                                                    : si.displayName();
-        // /run/media и /media — то, что монтирует udisks (флешки), /mnt — обычно разделы дисков
-        const bool usb = !root.startsWith(QLatin1String("/mnt/"));
-        QVariantMap m = item(name, root, usb ? QStringLiteral("usb") : QStringLiteral("drive"));
-        m[QStringLiteral("removable")] = true;
-        list << m;
-    }
-    if (list != m_devices) {
-        m_devices = list;
-        emit devicesChanged();
-    }
+    if (m_loadingDevices) return;
+    m_loadingDevices = true;
+    auto *task = new QFutureWatcher<QVariantList>(this);
+    connect(task, &QFutureWatcher<QVariantList>::finished, this, [this, task] {
+        const auto result = task->result();
+        task->deleteLater();
+        m_loadingDevices = false;
+        if (result != m_devices) {
+            m_devices = result;
+            emit devicesChanged();
+        }
+    });
+    task->setFuture(QtConcurrent::run([] {
+        QVariantList list;
+        list << item(tr("Файловая система"), QStringLiteral("/"), QStringLiteral("drive"));
+        for (const QStorageInfo &si : QStorageInfo::mountedVolumes()) {
+            const QString root = si.rootPath();
+            if (!si.isValid() || !si.isReady())
+                continue;
+            if (!(root.startsWith(QLatin1String("/run/media/")) || root.startsWith(QLatin1String("/media/"))
+                  || root.startsWith(QLatin1String("/mnt/"))))
+                continue;
+            const QString name = si.displayName().isEmpty() || si.displayName() == root ? QFileInfo(root).fileName()
+                                                                                        : si.displayName();
+            // /run/media и /media — то, что монтирует udisks (флешки), /mnt — обычно разделы дисков
+            const bool usb = !root.startsWith(QLatin1String("/mnt/"));
+            QVariantMap m = item(name, root, usb ? QStringLiteral("usb") : QStringLiteral("drive"));
+            m[QStringLiteral("removable")] = true;
+            m[QStringLiteral("ejectable")] = usb;
+            list << m;
+        }
+        return list;
+    }));
+
 }

@@ -9,6 +9,7 @@ Rectangle {
     signal navigate(string path)
     signal bookmarkMenu(string path, real x, real y)
     signal trashMenu(real x, real y)
+    signal deviceMenu(var device, real x, real y)
     signal filesDropped(var paths, string dest, bool move)
     signal openInNewTab(string path)
     signal openSettings()
@@ -144,6 +145,7 @@ Rectangle {
         // Бросить файлы в место; на корзину — убрать в корзину. Подержать — открыть
         DropArea {
             anchors.fill: parent
+            enabled: item.modelData.path.startsWith("/")
             onEntered: (drag) => {
                 var ps = FileOps.localPaths(drag.urls)
                 drag.accepted = ps.length > 0 && ps.indexOf(item.modelData.path) < 0
@@ -182,6 +184,8 @@ Rectangle {
                         side.bookmarkMenu(item.modelData.path, p.x, p.y)
                     else if (item.modelData.path === Places.trashPath)
                         side.trashMenu(p.x, p.y)
+                    else if (item.modelData.removable || item.modelData.unmounted)
+                        side.deviceMenu(item.modelData, p.x, p.y)
                     return
                 }
                 side.navigate(item.modelData.path)
@@ -190,7 +194,7 @@ Rectangle {
     }
 
     KeyedModel { id: bookmarks; source: Places.bookmarks }
-    KeyedModel { id: devices; source: Places.devices }
+    KeyedModel { id: devices; source: Places.devices.concat(Mounts.devices) }
 
     Flickable {
         anchors { left: parent.left; right: parent.right; top: parent.top; bottom: settingsBtn.top; bottomMargin: 4 }
@@ -222,6 +226,9 @@ Rectangle {
             }
 
             Section { text: qsTr("Устройства") }
+            PlaceItem {
+                modelData: ({path: "network:", name: qsTr("Сеть"), icon: "drive"})
+            }
             Repeater {
                 model: devices.model
                 PlaceItem {

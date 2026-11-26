@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QDateTime>
+#include <QCollator>
 #include <QFileInfo>
 #include <QMimeType>
 #include <QString>
+#include <optional>
 
 class QMimeDatabase;
 
@@ -32,6 +34,8 @@ struct FileEntry {
     bool isLocked = false;
     // Тип ещё не определён до конца — его доопределяет фон (DirModel)
     bool typePending = false;
+    std::optional<QCollatorSortKey> nameKey;
+    std::optional<QCollatorSortKey> typeKey;
 
     enum class Typing {
         Full,   // по имени, незнакомые — ещё и по содержимому
@@ -40,7 +44,7 @@ struct FileEntry {
                 // базах типов (flatpak, ~/.local/share/mime) Qt тратит ~0,25 мс на файл
     };
     static FileEntry fromInfo(const QFileInfo &fi, const QMimeDatabase &db, bool countChildren,
-                              Typing typing = Typing::Full);
+                              Typing typing = Typing::Full, std::optional<bool> parentWritable = std::nullopt);
     void setMime(const QMimeType &mt);
 };
 

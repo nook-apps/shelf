@@ -66,12 +66,12 @@ signals:
 private Q_SLOTS:
     // org.freedesktop.portal.Settings.SettingChanged
     void portalSettingChanged(const QString &ns, const QString &key, const QDBusVariant &value);
-    void pollWallpaper() { refreshWallpaper(false); }
+    void pollWallpaper() { refreshWallpaper(); }
 
 private:
     void load();
     void rewatch();
-    void readSystemScheme() const;
+    void readSystemScheme(bool legacy = false);
     // Тёмная ли тема в системе — спрашиваем портал только когда это понадобилось
     // (встроенная палитра «как в системе», обои): синхронный D-Bus стоил запуску десятки мс
     bool systemDark() const;
@@ -81,7 +81,7 @@ private:
     // Нужны ли обои: выбраны сами или auto, а файлов шелла нет
     bool wallpaperWanted() const;
     // Какие обои сейчас и их палитра; sync — сразу (при запуске), иначе в фоне
-    void refreshWallpaper(bool sync);
+    void refreshWallpaper();
     struct Wallpaper {
         QString path;
         QString key; // путь, время изменения, светлая/тёмная — пересчитываем, если сменилось

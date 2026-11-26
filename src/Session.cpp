@@ -23,10 +23,11 @@ bool shelfAlive(qint64 pid)
 }
 
 constexpr qint64 kMaxAgeDays = 7;
+int windowSerial = 0;
 }
 
 Session::Session(QObject *parent)
-    : QObject(parent)
+    : QObject(parent), m_window(++windowSerial)
 {
 }
 
@@ -43,10 +44,10 @@ QString Session::bootId()
 
 QString Session::ownFile() const
 {
-    return dir() + QStringLiteral("/%1.json").arg(QCoreApplication::applicationPid());
+    return dir() + QStringLiteral("/%1-%2.json").arg(QCoreApplication::applicationPid()).arg(m_window);
 }
 
-void Session::save(const QStringList &paths, int current)
+void Session::save(const QStringList &paths, int current, const QVariantList &splits)
 {
     if (!QDir().mkpath(dir()))
         return;
@@ -54,7 +55,8 @@ void Session::save(const QStringList &paths, int current)
                         {QStringLiteral("pid"), QCoreApplication::applicationPid()},
                         {QStringLiteral("saved"), QDateTime::currentSecsSinceEpoch()},
                         {QStringLiteral("current"), current},
-                        {QStringLiteral("paths"), QJsonArray::fromStringList(paths)}};
+                        {QStringLiteral("paths"), QJsonArray::fromStringList(paths)},
+                        {QStringLiteral("splits"), QJsonArray::fromVariantList(splits)}};
     // QSaveFile: выключение посреди записи не оставит обрезанный файл
     QSaveFile f(ownFile());
     if (f.open(QIODevice::WriteOnly)) {
@@ -102,8 +104,10 @@ QVariantMap Session::takeOrphan()
 
     // Папки могли удалить или отмонтировать, пока Shelf был закрыт
     const QJsonArray all = best.value(QStringLiteral("paths")).toArray();
+    const QJsonArray allSplits = best.value(QStringLiteral("splits")).toArray();
     const int current = best.value(QStringLiteral("current")).toInt();
     QStringList paths;
+    QVariantList splits;
     int newCurrent = 0;
     for (int i = 0; i < all.size(); ++i) {
         const QString p = all.at(i).toString();
@@ -112,8 +116,10 @@ QVariantMap Session::takeOrphan()
         if (i == current)
             newCurrent = int(paths.size());
         paths << p;
+        const auto split = allSplits.at(i).toObject();
+        splits << (QFileInfo(split.value(QStringLiteral("path")).toString()).isDir() ? split.toVariantMap() : QVariantMap{});
     }
     if (paths.isEmpty())
         return {};
-    return {{QStringLiteral("paths"), paths}, {QStringLiteral("current"), newCurrent}};
+    return {{QStringLiteral("paths"), paths}, {QStringLiteral("current"), newCurrent}, {QStringLiteral("splits"), splits}};
 }

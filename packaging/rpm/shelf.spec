@@ -1,5 +1,5 @@
 Name:           shelf
-Version:        0.5.3
+Version:        0.6.0
 Release:        1%{?dist}
 Summary:        Glass file manager for Hyprland in Qt 6 / QML
 
@@ -15,6 +15,7 @@ BuildRequires:  gcc-c++
 BuildRequires:  qt6-qtbase-devel >= 6.7
 BuildRequires:  qt6-qtdeclarative-devel >= 6.7
 BuildRequires:  desktop-file-utils
+BuildRequires:  pkgconfig(gio-2.0)
 
 # SVG грузит плагин изображений, а не ссылка на библиотеку — сам он не подтянется
 Requires:       qt6-qtsvg%{?_isa}
@@ -29,6 +30,8 @@ Requires:       xdg-desktop-portal
 # Миниатюры картинок, PDF и видео
 Recommends:     tumbler
 Recommends:     ffmpegthumbnailer
+Recommends:     poppler-utils
+Recommends:     gvfs gvfs-smb gvfs-mtp gvfs-fuse
 # Распаковка и сжатие архивов
 Recommends:     bsdtar
 
@@ -62,9 +65,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.nook_apps.S
 %{_datadir}/icons/hicolor/16x16/apps/io.github.nook_apps.Shelf.svg
 %{_libexecdir}/xdg-desktop-portal-shelf
 %{_datadir}/dbus-1/services/org.freedesktop.impl.portal.desktop.shelf.service
+%{_datadir}/dbus-1/services/io.github.nook_apps.Shelf.service
+%{_datadir}/dbus-1/services/org.freedesktop.FileManager1.service
 %{_datadir}/xdg-desktop-portal/portals/shelf.portal
 
 %changelog
+* Fri Nov 27 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.6.0-1
+- Add split view, search filters, templates and bulk rename
+- Preview PDF and office documents and browse GVfs locations
+- Move directory and thumbnail I/O to background tasks and support FileManager1
 * Fri Nov 20 2026 Stasyao37 <kapitonov.stass@gmail.com> - 0.5.3-1
 - Send files and folders with LocalSend from the file menu
 - Offer LocalSend installation instructions; refresh release cards

@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Зависимости
         # bsdtar и tar — чтобы тесты архивов не пропускались
-        run: dnf -y -q install cmake ninja-build gcc-c++ qt6-qtbase-devel qt6-qtdeclarative-devel python3 bsdtar tar
+        run: dnf -y -q install cmake ninja-build gcc-c++ glib2-devel pkgconf-pkg-config qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg python3 bsdtar tar
       - name: Сборка
         run: |
           cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DSHELF_TESTS=ON

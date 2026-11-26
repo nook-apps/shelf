@@ -6,13 +6,14 @@ Item {
     id: tog
     property bool checked: false
     signal toggled(bool on)
-    width: 38; height: 22
+    implicitWidth: 38; implicitHeight: 22
+    function toggle() { toggled(!checked) }
     Rectangle {
         anchors.fill: parent
         radius: height / 2
         color: tog.checked ? Theme.activeFill(Theme.accent) : Theme.ink(0.08)
-        border.width: 1
-        border.color: tog.checked ? Theme.accent : Theme.ink(0.25)
+        border.width: tog.activeFocus ? 2 : 1
+        border.color: tog.activeFocus || tog.checked ? Theme.accent : Theme.ink(0.25)
         Behavior on color { ColorAnimation { duration: 140 } }
     }
     Rectangle {
@@ -25,6 +26,6 @@ Item {
     MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
-        onClicked: tog.toggled(!tog.checked)
+        onClicked: tog.toggle()
     }
 }

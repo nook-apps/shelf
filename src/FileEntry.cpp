@@ -77,7 +77,8 @@ void FileEntry::setMime(const QMimeType &mt)
     icon = mt.iconName() + QLatin1Char(',') + mt.genericIconName();
 }
 
-FileEntry FileEntry::fromInfo(const QFileInfo &fi, const QMimeDatabase &db, bool countChildren, Typing typing)
+FileEntry FileEntry::fromInfo(const QFileInfo &fi, const QMimeDatabase &db, bool countChildren, Typing typing,
+                              std::optional<bool> parentWritable)
 {
     FileEntry e;
     e.name = fi.fileName();
@@ -87,7 +88,7 @@ FileEntry FileEntry::fromInfo(const QFileInfo &fi, const QMimeDatabase &db, bool
     e.isHidden = e.name.startsWith(QLatin1Char('.'));
     e.isLink = fi.isSymLink();
     const bool readable = fi.isReadable() && (!fi.isDir() || fi.isExecutable());
-    e.isLocked = !readable || (!fi.isWritable() && QFileInfo(fi.absolutePath()).isWritable());
+    e.isLocked = !readable || (!fi.isWritable() && (parentWritable ? *parentWritable : QFileInfo(fi.absolutePath()).isWritable()));
     e.mtime = fi.lastModified();
     e.created = fi.birthTime();
     if (!e.created.isValid()) e.created = e.mtime;
