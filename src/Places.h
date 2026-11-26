@@ -53,4 +53,5 @@ private:
     QTimer m_devTimer;
     QFileSystemWatcher m_trashWatcher;
     bool m_trashFull = false;
+    bool m_loadingDevices = false;
 };

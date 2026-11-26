@@ -1,0 +1,37 @@
+name: benchmark
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    container: fedora:43
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Dependencies
+        run: dnf -y -q install cmake ninja-build gcc-c++ glib2-devel pkgconf-pkg-config qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg python3
+      - name: Build and compare
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          args=()
+          if git rev-parse --verify --quiet refs/tags/v0.6.0; then
+            git worktree add --detach /tmp/shelf-baseline v0.6.0
+            cmake -S /tmp/shelf-baseline -B /tmp/shelf-baseline/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build /tmp/shelf-baseline/build
+            args+=(--baseline-binary /tmp/shelf-baseline/build/shelf --threshold 40)
+          fi
+          python3 tools/bench.py build/shelf --runs 3 --output benchmark.json "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shelf-benchmark
+          path: benchmark.json

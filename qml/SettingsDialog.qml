@@ -13,6 +13,12 @@ GlassDialog {
     signal foldersFirstToggled(bool on)
     property bool rememberFolders: true
     signal rememberFoldersToggled(bool on)
+    property bool resident: false
+    property bool externalNewWindow: false
+    property int idleMemoryKiB: 0
+    signal residentToggled(bool on)
+    signal externalNewWindowToggled(bool on)
+    signal quitRequested()
     signal firstRunRequested()
     // Сообщение в тост главного окна
     signal message(string text)
@@ -29,6 +35,29 @@ GlassDialog {
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSize - 3
         font.weight: Font.DemiBold
+    }
+    component SettingToggle: Item {
+        id: setting
+        required property string text
+        required property bool checked
+        signal toggled(bool on)
+        width: parent.width
+        height: Math.max(38, settingText.implicitHeight + 16)
+        Text {
+            id: settingText
+            anchors { left: parent.left; leftMargin: 12; right: settingSwitch.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            text: setting.text
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 1
+            wrapMode: Text.Wrap
+        }
+        ToggleSwitch {
+            id: settingSwitch
+            anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            checked: setting.checked
+            onToggled: (on) => setting.toggled(on)
+        }
     }
 
     // Ползунок; moved — пока тянут, released — отпустили (тогда и сохраняем)
@@ -253,6 +282,18 @@ GlassDialog {
                 }
 
                 SectionTitle { text: qsTr("ПРОВОДНИК") }
+                SettingToggle {
+                    text: qsTr("Открывать внешние запросы в новом окне")
+                    checked: dlg.externalNewWindow
+                    onToggled: (on) => dlg.externalNewWindowToggled(on)
+                }
+                SettingToggle {
+                    text: dlg.idleMemoryKiB > 0 ? qsTr("Оставлять Shelf в фоне (%1 МиБ в простое)").arg(Math.round(dlg.idleMemoryKiB / 1024))
+                                                : qsTr("Оставлять Shelf в фоне")
+                    checked: dlg.resident
+                    onToggled: (on) => dlg.residentToggled(on)
+                }
+                TextButton { text: qsTr("Выйти из Shelf"); onClicked: dlg.quitRequested() }
                 Item {
                     width: parent.width
                     height: 38

@@ -27,7 +27,18 @@ void GroupedModel::setSourceModel(QAbstractItemModel *source)
         m_connections << connect(source, &QAbstractItemModel::modelReset, this, &GroupedModel::rebuild)
                       << connect(source, &QAbstractItemModel::rowsInserted, this, &GroupedModel::rebuild)
                       << connect(source, &QAbstractItemModel::rowsRemoved, this, &GroupedModel::rebuild)
-                      << connect(source, &QAbstractItemModel::dataChanged, this, &GroupedModel::rebuild)
+                      << connect(source, &QAbstractItemModel::dataChanged, this,
+                                 [this](const QModelIndex &first, const QModelIndex &last, const QList<int> &roles) {
+                                     if (roles.isEmpty() || roles.contains(DirModel::GroupIdRole)
+                                         || roles.contains(DirModel::GroupLabelRole)) {
+                                         rebuild();
+                                         return;
+                                     }
+                                     for (int row = first.row(); row <= last.row(); ++row) {
+                                         const QModelIndex visual = index(visualIndex(row), 0);
+                                         if (visual.isValid()) emit dataChanged(visual, visual, roles);
+                                     }
+                                 })
                       << connect(source, &QAbstractItemModel::layoutChanged, this, &GroupedModel::rebuild)
                       << connect(source, &QObject::destroyed, this, [this] { setSourceModel(nullptr); });
     }

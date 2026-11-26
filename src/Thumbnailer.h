@@ -1,68 +1,73 @@
 #pragma once
 
-#include <QHash>
 #include <QCache>
+#include <QFutureWatcher>
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
-// Миниатюры по спецификации freedesktop: общий кэш ~/.cache/thumbnails
-// (его же заполняют Thunar, Nautilus, браузеры), недостающие делает tumbler
-// по D-Bus. Сам Shelf картинки не уменьшает — только ищет и заказывает.
 class Thumbnailer : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
-
-    // Растёт, когда появились новые миниатюры: биндинги в QML перечитывают thumbnail()
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 
 public:
     explicit Thumbnailer(QObject *parent = nullptr);
-
     int revision() const { return m_revision; }
 
-    // URL готовой миниатюры или пустая строка. Если её нет — заказывает у tumbler,
-    // и когда он закончит, revision вырастет. size — сторона значка в логических
-    // пикселях: по ней выбирается размер миниатюры (normal 128 … xx-large 1024).
-    // Пока нужной нет, отдаёт меньшую из кэша, если она есть.
-    Q_INVOKABLE QString thumbnail(const QString &path, const QString &mimeType, int size = 56);
-
-    // Имя файла миниатюры: MD5 от file://-URI, как в GLib
+    Q_INVOKABLE QString thumbnail(const QString &path, const QString &mimeType, int size = 56, qint64 mtime = -1);
+    Q_INVOKABLE void watch(const QString &path);
+    Q_INVOKABLE void unwatch(const QString &path);
     static QString cacheName(const QString &path);
 
 signals:
     void revisionChanged();
+    void pathChanged(const QString &path);
 
 private slots:
     void onReady(uint handle, const QStringList &uris);
     void onError(uint handle, const QStringList &uris, int code, const QString &message);
+    void onFinished(uint handle);
 
 private:
     friend class TestResources;
-    struct Known {
-        qint64 mtime = 0;
+    struct Known { qint64 mtime; QString url; };
+    struct Lookup {
+        QString path, mime;
+        int flavor;
+        qint64 mtime;
         QString url;
+        bool complete = false, failed = false;
     };
 
     void loadSupported();
     int flavorFor(int size) const;
+    void lookupQueued();
     void flush();
-    void bump();
+    void dequeueUnused();
+    void serviceChanged(const QString &oldOwner, const QString &newOwner);
+    void notifyPath(const QString &path);
 
     QString m_cacheDir;
-    QStringList m_failDirs; // fail/<программа>/ — у каждой своя
-    bool m_supportedLoaded = false;
-    QSet<QString> m_supported; // MIME-типы, которые tumbler умеет для file://
-    int m_maxFlavor = 1;                // самый крупный размер, который умеет tumbler
-    QCache<QString, Known> m_known{4096};      // ключ — номер размера и путь
-    QCache<QString, qint64> m_never{4096};     // путь → mtime: миниатюры нет и не будет
-    QHash<int, QHash<QString, QString>> m_queue; // размер → путь → MIME, ждут отправки
-    QSet<QString> m_pending;            // отправлены tumbler'у (ключ как у m_known)
+    QSet<QString> m_supported;
+    int m_maxFlavor = 1;
+    QCache<QString, Known> m_known{4096};
+    QCache<QString, qint64> m_never{4096};
+    QCache<QString, qint64> m_unavailable{4096};
+    QHash<QString, int> m_watchers;
+    QHash<QString, Lookup> m_checkQueued;
+    QHash<QString, qint64> m_checkRunning;
+    QFutureWatcher<QList<Lookup>> m_checker;
+    QHash<int, QHash<QString, Lookup>> m_queue;
+    QHash<QString, qint64> m_pending;
+    QHash<uint, QHash<QString, QString>> m_handles;
+    QTimer m_lookupTimer;
     QTimer m_flushTimer;
-    QTimer m_bumpTimer;
+    int m_generation = 0;
     int m_revision = 0;
 };

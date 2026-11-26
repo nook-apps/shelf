@@ -1,6 +1,10 @@
 #include "ThemeSource.h"
 #include "Language.h"
 #include "WallpaperPalette.h"
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QGuiApplication>
+#include <QStyleHints>
 
 #include <QDBusConnection>
 #include <QDBusInterface>
@@ -107,6 +111,8 @@ ThemeSource::ThemeSource(QObject *parent)
                                           this, SLOT(portalSettingChanged(QString, QString, QDBusVariant)));
     m_wallTimer.setInterval(4000);
     connect(&m_wallTimer, &QTimer::timeout, this, &ThemeSource::pollWallpaper);
+    m_systemDark = QGuiApplication::styleHints()->colorScheme() != Qt::ColorScheme::Light;
+    QTimer::singleShot(0, this, [this] { readSystemScheme(); });
     load();
 }
 
@@ -218,11 +224,19 @@ QVariantMap ThemeSource::glassSettings()
         if (m_hyprBlur < 0) {
             m_hyprBlur = 0;
             if (!qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
-                QProcess p;
-                p.start(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("getoption"),
-                                                   QStringLiteral("decoration:blur:enabled")});
-                if (p.waitForFinished(1000))
-                    m_hyprBlur = QJsonDocument::fromJson(p.readAllStandardOutput()).object().value(QStringLiteral("int")).toInt();
+                auto *watcher = new QFutureWatcher<int>(this);
+                connect(watcher, &QFutureWatcher<int>::finished, this, [this, watcher] {
+                    m_hyprBlur = watcher->result();
+                    watcher->deleteLater();
+                    load();
+                });
+                watcher->setFuture(QtConcurrent::run([] {
+                    QProcess p;
+                    p.start(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("getoption"),
+                                                       QStringLiteral("decoration:blur:enabled")});
+                    if (!p.waitForFinished(1000)) { p.kill(); p.waitForFinished(); return 0; }
+                    return QJsonDocument::fromJson(p.readAllStandardOutput()).object().value(QStringLiteral("int")).toInt();
+                }));
             }
         }
         s[QStringLiteral("glass")] = m_hyprBlur == 1;
@@ -278,32 +292,27 @@ void ThemeSource::resetGlass()
 
 bool ThemeSource::systemDark() const
 {
-    if (!m_schemeKnown)
-        readSystemScheme();
     return m_systemDark;
 }
 
-void ThemeSource::readSystemScheme() const
+void ThemeSource::readSystemScheme(bool legacy)
 {
-    m_schemeKnown = true;
-    // Прямой вызов, без QDBusInterface: тот перед вызовом ещё и интроспектирует объект
-    const auto call = [](const QString &method) {
-        QDBusMessage msg = QDBusMessage::createMethodCall(kPortalService, kPortalPath, kPortalSettings, method);
-        msg << QStringLiteral("org.freedesktop.appearance") << QStringLiteral("color-scheme");
-        return QDBusReply<QDBusVariant>(portalBus().call(msg, QDBus::Block, 500));
-    };
-    // 1 — тёмная, 2 — светлая, 0 — без предпочтения (берём тёмную, как у шелла)
-    QDBusReply<QDBusVariant> one = call(QStringLiteral("ReadOne"));
-    uint scheme = 0;
-    if (one.isValid()) {
-        scheme = one.value().variant().toUInt();
-    } else {
-        // Старые порталы: Read и значение, завёрнутое в ещё один variant
-        QDBusReply<QDBusVariant> old = call(QStringLiteral("Read"));
-        if (old.isValid())
-            scheme = qvariant_cast<QDBusVariant>(old.value().variant()).variant().toUInt();
-    }
-    m_systemDark = scheme != 2;
+    const auto ns = QStringLiteral("org.freedesktop.appearance"), key = QStringLiteral("color-scheme");
+    auto msg = QDBusMessage::createMethodCall(kPortalService, kPortalPath, kPortalSettings,
+                                            legacy ? QStringLiteral("Read") : QStringLiteral("ReadOne"));
+    msg << ns << key;
+    auto *watcher = new QDBusPendingCallWatcher(portalBus().asyncCall(msg, 500), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, ns, key, legacy](QDBusPendingCallWatcher *w) {
+        const QDBusPendingReply<QDBusVariant> reply = *w;
+        w->deleteLater();
+        if (m_schemeKnown) return;
+        if (!reply.isError()) {
+            const auto value = legacy ? qvariant_cast<QDBusVariant>(reply.value().variant()) : reply.value();
+            portalSettingChanged(ns, key, value);
+        } else if (!legacy && reply.error().type() == QDBusError::UnknownMethod) {
+            readSystemScheme(true);
+        }
+    });
 }
 
 void ThemeSource::portalSettingChanged(const QString &ns, const QString &key, const QDBusVariant &value)
@@ -317,7 +326,7 @@ void ThemeSource::portalSettingChanged(const QString &ns, const QString &key, co
         return;
     m_systemDark = dark;
     if (wallpaperWanted())
-        refreshWallpaper(false); // палитра обоев своя для светлой и тёмной
+        refreshWallpaper(); // палитра обоев своя для светлой и тёмной
     load();
 }
 
@@ -334,12 +343,13 @@ bool ThemeSource::wallpaperWanted() const
     return true;
 }
 
-void ThemeSource::refreshWallpaper(bool sync)
+void ThemeSource::refreshWallpaper()
 {
     if (m_wallBusy)
         return;
     m_wallChecked = true;
-    auto job = [dark = systemDark(), old = m_wall]() {
+    const bool dark = systemDark();
+    auto job = [dark, old = m_wall]() {
         Wallpaper w;
         w.path = WallpaperPalette::current();
         if (w.path.isEmpty())
@@ -349,17 +359,14 @@ void ThemeSource::refreshWallpaper(bool sync)
         w.palette = w.key == old.key ? old.palette : WallpaperPalette::fromFile(w.path, dark);
         return w;
     };
-    if (sync) {
-        applyWallpaper(job(), false);
-        return;
-    }
     // В фоне: ищем по /proc и hyprctl, PNG в 4K читается заметное время
     m_wallBusy = true;
     auto *watcher = new QFutureWatcher<Wallpaper>(this);
-    connect(watcher, &QFutureWatcher<Wallpaper>::finished, this, [this, watcher] {
+    connect(watcher, &QFutureWatcher<Wallpaper>::finished, this, [this, watcher, dark] {
         watcher->deleteLater();
         m_wallBusy = false;
-        applyWallpaper(watcher->result(), true);
+        if (dark == systemDark()) applyWallpaper(watcher->result(), true);
+        else refreshWallpaper();
     });
     watcher->setFuture(QtConcurrent::run(job));
 }
@@ -397,7 +404,7 @@ void ThemeSource::load()
     const bool fromFile = !fileOf(id).isEmpty();
     const bool wantWall = wallpaperWanted();
     if (wantWall && !m_wallChecked)
-        refreshWallpaper(true); // первый раз — сразу, чтобы не мигнуть встроенной палитрой
+        refreshWallpaper();
     if (wantWall != m_wallTimer.isActive())
         wantWall ? m_wallTimer.start() : m_wallTimer.stop();
     // Выбранный файл ещё не появился или обоев не нашли — как в auto

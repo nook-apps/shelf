@@ -6,15 +6,17 @@
   stdenv,
   cmake,
   ninja,
+  pkg-config,
   qt6,
   glib,
   xdg-utils,
   libarchive,
+  coreutils,
 }:
 
 stdenv.mkDerivation {
   pname = "shelf";
-  version = "0.5.3";
+  version = "0.6.0";
 
   src = lib.fileset.toSource {
     root = ../..;
@@ -33,10 +35,12 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     cmake
     ninja
+    pkg-config
     qt6.wrapQtAppsHook
   ];
 
   buildInputs = [
+    glib
     qt6.qtbase
     qt6.qtdeclarative
     qt6.qtsvg
@@ -45,7 +49,7 @@ stdenv.mkDerivation {
 
   qtWrapperArgs = [
     # bsdtar из libarchive — распаковка и сжатие архивов
-    "--prefix PATH : ${lib.makeBinPath [ (lib.getBin glib) xdg-utils libarchive ]}"
+    "--prefix PATH : ${lib.makeBinPath [ (lib.getBin glib) xdg-utils libarchive coreutils ]}"
   ];
 
   meta = {

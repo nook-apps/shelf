@@ -205,6 +205,12 @@ GlassDialog {
                     hint: ok ? "" : Environment.installCommand("ffmpegthumbnailer")
                 }
                 Check {
+                    ok: Mounts.networkAvailable()
+                    optional: true
+                    label: ok ? qsTr("Сетевые папки и телефоны (GVfs)") : qsTr("Нет GVfs — сетевые папки недоступны")
+                    hint: ok ? "" : Environment.installCommand("gvfs")
+                }
+                Check {
                     ok: FileOps.archiver !== ""
                     optional: true
                     label: ok ? qsTr("Архивы: %1").arg(FileOps.archiver.substring(FileOps.archiver.lastIndexOf("/") + 1))

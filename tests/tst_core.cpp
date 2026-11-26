@@ -4,6 +4,7 @@
 #include "GroupedModel.h"
 #include "FolderViews.h"
 #include "FileOps.h"
+#include "Preview.h"
 #include "GlassIcons.h"
 #include "Language.h"
 #include "Apps.h"
@@ -126,6 +127,7 @@ private slots:
         QVERIFY(store.get(m_dir).isEmpty());
         QVERIFY(!QFile::exists(file)); // простое открытие не закрепляет вид
         QVERIFY(store.save(m_dir, view));
+        QVERIFY(store.flush());
         FolderViews other;
         QCOMPARE(other.get(m_dir), view); // новый экземпляр читает с диска
         const auto alias = m_dir + "-link";
@@ -136,8 +138,10 @@ private slots:
         QVERIFY(!other.save(m_dir, invalid));
         QCOMPARE(store.get(m_dir), view);
         QVERIFY(other.reset(alias));
-        QVERIFY(store.get(m_dir).isEmpty());
+        QVERIFY(other.flush());
+        QTRY_VERIFY(store.get(m_dir).isEmpty());
         QVERIFY(store.save(m_dir, view));
+        QVERIFY(store.flush());
         QVERIFY(QDir(m_dir).removeRecursively());
         QVERIFY(other.get(m_dir).isEmpty());
         QFile::remove(alias);
@@ -160,6 +164,7 @@ private slots:
         write(file, QJsonDocument(entries).toJson());
         FolderViews store;
         QVERIFY(store.save(m_dir, view));
+        QVERIFY(store.flush());
         QVERIFY(store.get(m_dir + "/0").isEmpty());
         QCOMPARE(store.get(m_dir + "/1"), view);
         QCOMPARE(store.get(m_dir), view);
@@ -168,7 +173,7 @@ private slots:
         QVERIFY(!saved.contains(m_dir + "/gone"));
         // Повреждённый файл не мешает сохранить новый вид.
         write(file, "broken");
-        QVERIFY(store.get(m_dir).isEmpty());
+        QTRY_VERIFY(store.get(m_dir).isEmpty());
         QVERIFY(store.save(m_dir, view));
         QCOMPARE(store.get(m_dir), view);
     }
@@ -220,6 +225,7 @@ private slots:
         write(m_dir + "/a.txt"); write(m_dir + "/b.txt"); write(m_dir + "/c.png");
         DirModel model;
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
         model.setGroupBy("type");
         GroupedModel layout;
         QAbstractItemModelTester tester(&layout, QAbstractItemModelTester::FailureReportingMode::QtTest);
@@ -236,6 +242,7 @@ private slots:
     {
         for (int i=0; i<20; ++i) write(m_dir + QString("/%1.%2").arg(i).arg(i%2 ? "txt" : "png"));
         DirModel model; model.setPath(m_dir); model.setGroupBy("type");
+        QTRY_VERIFY(!model.loading());
         GroupedModel layout;
         QCOMPARE(layout.roleNames(), model.roleNames()); // QML может назначить прокси до sourceModel
         layout.setSourceModel(&model);
@@ -271,6 +278,7 @@ private slots:
             QElapsedTimer timer;
             timer.start();
             model.setPath(m_dir);
+            while (model.loading() && timer.elapsed() < 5000) QCoreApplication::processEvents();
             const auto ms = timer.elapsed();
             if (model.count() != 10000 || (grouped && layout.fileIndexAt(layout.visualIndex(9999)) != 9999))
                 return qint64(-1);
@@ -313,6 +321,7 @@ private slots:
         DirModel model;
         QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
         QCOMPARE(model.count(), 4);
 
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
@@ -336,11 +345,13 @@ private slots:
         DirModel model;
         QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
 
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
         QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
         write(m_dir + "/b.txt");
         model.reload();
+        QTRY_VERIFY(!model.loading());
         QCOMPARE(reset.count(), 0);
         QCOMPARE(inserted.count(), 1);
         QCOMPARE(inserted.first().at(1).toInt(), 1);
@@ -355,10 +366,12 @@ private slots:
         DirModel model;
         QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
         model.setPath(m_dir + "/one");
+        QTRY_VERIFY(!model.loading());
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
         QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
         model.setPath(m_dir + "/two");
-        QCOMPARE(reset.count(), 1);
+        QTRY_VERIFY(!model.loading());
+        QVERIFY(reset.count() >= 1);
         QCOMPARE(removed.count(), 0);
         QCOMPARE(model.pathAt(0), m_dir + "/two/b.txt");
     }
@@ -373,15 +386,84 @@ private slots:
         QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
         QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
         const int row = model.indexOfPath(m_dir + "/doc");
-        QCOMPARE(model.mimeTypeAt(row), QStringLiteral("application/octet-stream"));
         QTRY_COMPARE(model.mimeTypeAt(row), QStringLiteral("application/pdf"));
         QCOMPARE(changed.count(), 1);
 
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
         model.reload();
+        QTRY_VERIFY(!model.loading());
         QCOMPARE(model.mimeTypeAt(row), QStringLiteral("application/pdf"));
         QCOMPARE(reset.count(), 0);
+    }
+
+    void cancelsListingAndCombinesSearchFilters()
+    {
+        write(m_dir + "/obsolete/file.txt");
+        write(m_dir + "/wanted/note.txt", "visible");
+        write(m_dir + "/wanted/note.png", "different type");
+        write(m_dir + "/wanted/note-small.txt", "x");
+        write(m_dir + "/wanted/sub/note.txt", "nested");
+        DirModel model;
+        model.setPath(m_dir + "/obsolete");
+        model.setPath(m_dir + "/wanted");
+        QTRY_VERIFY(!model.loading());
+        QCOMPARE(model.count(), 4);
+        QVERIFY(model.indexOfPath(m_dir + "/obsolete/file.txt") < 0);
+        model.setSearchOptions({{"type", "document"}, {"min", 3}, {"days", 1}, {"recursive", false}});
+        model.setSearchQuery("note");
+        QTRY_VERIFY(!model.searching());
+        QCOMPARE(model.count(), 1);
+        QCOMPARE(model.pathAt(0), m_dir + "/wanted/note.txt");
+    }
+
+    void sortsFileSizesAndFolderCountsTogether()
+    {
+        QVERIFY(QDir(m_dir).mkdir("folder"));
+        write(m_dir + "/folder/item1");
+        write(m_dir + "/folder/item2");
+        write(m_dir + "/small", "x");
+        write(m_dir + "/large", "xxx");
+        DirModel model;
+        model.setViewSort("size", false, {}, false);
+        model.setPath(m_dir);
+        QTRY_COMPARE(model.pathAt(0), m_dir + "/small");
+        QCOMPARE(model.pathAt(1), m_dir + "/folder");
+        QCOMPARE(model.pathAt(2), m_dir + "/large");
+    }
+
+    void createAndRenameBatch()
+    {
+        FileOps ops;
+        const auto source = m_dir + "/template.txt";
+        write(source, "template");
+        const auto file = ops.newFile(m_dir, "untitled.txt", source);
+        QCOMPARE(read(file), "template");
+        QCOMPARE(ops.rename(file, "new.txt"), QString());
+        write(m_dir + "/new.txt", "edited");
+        ops.undo();
+        QVERIFY(waitJob(ops));
+        QVERIFY(!QFile::exists(m_dir + "/new.txt"));
+        ops.redo();
+        QVERIFY(waitJob(ops));
+        QCOMPARE(read(m_dir + "/new.txt"), "edited");
+
+        const QString a = m_dir + "/01.txt", b = m_dir + "/02.txt";
+        write(a, "a"); write(b, "b");
+        const QVariantMap options{{"mode", "number"}, {"digits", 2}};
+        ops.renameMany({b, a}, options);
+        QVERIFY(waitJob(ops));
+        QCOMPARE(read(a), "b"); QCOMPARE(read(b), "a");
+        ops.undo();
+        QVERIFY(waitJob(ops));
+        QCOMPARE(read(a), "a"); QCOMPARE(read(b), "b");
+        ops.redo();
+        QVERIFY(waitJob(ops));
+        QCOMPARE(read(a), "b"); QCOMPARE(read(b), "a");
+        const auto collision = ops.renamePreview({a, b}, {{"mode", "replace"}, {"pattern", "[0-9]+"},
+            {"replacement", "same"}, {"regex", true}});
+        QVERIFY(!collision.first().toMap().value("error").toString().isEmpty());
     }
 
     // ── Конфликты при переносе ─────────────────────────────────────
@@ -821,45 +903,57 @@ private slots:
     }
 
     // ── Быстрый просмотр ──────────────────────────────────────────
-    void previewText()
+    void previewLatestRequest()
     {
-        write(m_dir + "/a.txt", "привет");
-        QVariantMap r = FileOps::readTextPreview(m_dir + "/a.txt");
-        QCOMPARE(r.value("text").toString(), QStringLiteral("привет"));
-        QCOMPARE(r.value("truncated").toBool(), false);
-        QCOMPARE(r.value("binary").toBool(), false);
+        write(m_dir + "/a.txt", QByteArray(64 * 1024, 'x') + "tail");
+        write(m_dir + "/b.txt", "последний");
+        Preview preview;
+        preview.open(m_dir + "/a.txt", "text");
+        QTRY_COMPARE(preview.status(), "ready");
+        QVERIFY(preview.truncated());
+        QCOMPARE(preview.text().size(), 64 * 1024);
+        preview.open(m_dir + "/a.txt", "text");
+        preview.open(m_dir + "/b.txt", "text");
+        preview.open(m_dir + "/a.txt", "text");
+        QTRY_COMPARE(preview.status(), "ready");
+        QVERIFY(preview.truncated());
+        preview.open(m_dir + "/b.txt", "text");
+        QTRY_COMPARE(preview.status(), "ready");
+        QCOMPARE(preview.text(), QStringLiteral("последний"));
+        preview.cancel();
+        QVERIFY(preview.text().isEmpty());
+    }
 
-        // Обрезано посреди «и» (2 байта в UTF-8): половинка не превращается в «�»
-        write(m_dir + "/long.txt", QByteArray("ab") + QString("и").toUtf8() + "cd");
-        r = FileOps::readTextPreview(m_dir + "/long.txt", 3);
-        QCOMPARE(r.value("text").toString(), QStringLiteral("ab"));
-        QCOMPARE(r.value("truncated").toBool(), true);
-
-        write(m_dir + "/bin", QByteArray("ELF\0\1\2", 6));
-        r = FileOps::readTextPreview(m_dir + "/bin");
-        QCOMPARE(r.value("binary").toBool(), true);
-        QVERIFY(r.value("text").toString().isEmpty());
+    void previewDocumentFixtures()
+    {
+        const QString root = qEnvironmentVariable("SHELF_TEST_DOCUMENTS");
+        if (root.isEmpty()) QSKIP("Set SHELF_TEST_DOCUMENTS to run the optional PDF/office fixture matrix");
+        Preview preview;
+        for (const QString &suffix : QStringList{"pdf", "odt", "docx", "xlsx", "pptx", "rtf"}) {
+            const QString path = root + "/sample." + suffix;
+            QVERIFY2(QFile::exists(path), qPrintable(path));
+            const auto kind = Preview::kindFor(path, "application/octet-stream", false);
+            preview.open(path, kind);
+            QTRY_VERIFY_WITH_TIMEOUT(preview.status() != "loading", 20000);
+            QVERIFY2(preview.status() == QLatin1String("ready"), qPrintable(path + ": " + preview.status()));
+            QVERIFY(!QImage(preview.image().toLocalFile()).isNull());
+        }
     }
 
     void previewKindAndRowInfo()
     {
-        FileOps ops;
         QDir().mkpath(m_dir + "/sub");
         write(m_dir + "/a.py", "print()");
-        QCOMPARE(ops.previewKind(m_dir + "/sub", "inode/directory"), "dir");
-        QCOMPARE(ops.previewKind(m_dir + "/a.png", "image/png"), "image");
-        QCOMPARE(ops.previewKind(m_dir + "/a.py", "text/x-python"), "text");
-        QCOMPARE(ops.previewKind(m_dir + "/a.json", "application/json"), "text");
-        QCOMPARE(ops.previewKind(m_dir + "/a.pdf", "application/pdf"), "other");
-
-        QSignalSpy got(&ops, &FileOps::textPreview);
-        ops.requestTextPreview(m_dir + "/a.py");
-        QVERIFY(got.wait(5000));
-        QCOMPARE(got.first().at(0).toString(), m_dir + "/a.py");
-        QCOMPARE(got.first().at(1).toString(), QStringLiteral("print()"));
+        QCOMPARE(Preview::kindFor(m_dir + "/sub", "inode/directory", true), "dir");
+        QCOMPARE(Preview::kindFor(m_dir + "/a.png", "image/png", false), "image");
+        QCOMPARE(Preview::kindFor(m_dir + "/a.py", "text/x-python", false), "text");
+        QCOMPARE(Preview::kindFor(m_dir + "/a.pdf", "application/pdf", false), "pdf");
+        for (const auto &suffix : {"odt", "docx", "xlsx", "pptx", "rtf"})
+            QCOMPARE(Preview::kindFor(m_dir + "/document." + suffix, "application/octet-stream", false), "office");
 
         DirModel model;
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
         const QVariantMap info = model.rowInfo(model.indexOfPath(m_dir + "/a.py"));
         QCOMPARE(info.value("name").toString(), QStringLiteral("a.py"));
         QCOMPARE(info.value("isDir").toBool(), false);
@@ -879,8 +973,9 @@ private slots:
         FileOps ops;
         DirModel model;
         model.setPath(m_dir);
+        QTRY_VERIFY(!model.loading());
         const QModelIndex sub = model.index(model.indexOfPath(m_dir + "/sub"));
-        QCOMPARE(model.data(sub, DirModel::SizeTextRole).toString(), QStringLiteral("3 эл."));
+        QTRY_COMPARE(model.data(sub, DirModel::SizeTextRole).toString(), QStringLiteral("3 эл."));
         QCOMPARE(ops.rename(m_dir + "/sub", "a/b"), QStringLiteral("Недопустимое имя"));
         QCOMPARE(QCoreApplication::translate("FileOps", "%n объект(ов)", nullptr, 3), QStringLiteral("3 объекта"));
         QCOMPARE(QCoreApplication::translate("FileOps", "%n объект(ов)", nullptr, 11), QStringLiteral("11 объектов"));
@@ -888,15 +983,17 @@ private slots:
 
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
         Language::apply(QStringLiteral("en"));
+        QTRY_VERIFY(!model.loading());
         QCOMPARE(Language::current(), QStringLiteral("en"));
         QCOMPARE(ops.rename(m_dir + "/sub", "a/b"), QStringLiteral("Invalid name"));
         QCOMPARE(QCoreApplication::translate("FileOps", "%n объект(ов)", nullptr, 1), QStringLiteral("1 item"));
         QCOMPARE(QCoreApplication::translate("FileOps", "%n объект(ов)", nullptr, 3), QStringLiteral("3 items"));
         QCOMPARE(formatSize(2560), QStringLiteral("2.5 KB"));
-        QCOMPARE(model.data(sub, DirModel::SizeTextRole).toString(), QStringLiteral("3 items"));
+        QTRY_COMPARE(model.data(model.index(model.indexOfPath(m_dir + "/sub")), DirModel::SizeTextRole).toString(), QStringLiteral("3 items"));
         QCOMPARE(model.mimeCommentAt(model.indexOfPath(m_dir + "/sub")), QStringLiteral("Folder"));
 
         Language::apply(QStringLiteral("ru"));
+        QTRY_VERIFY(!model.loading());
         QCOMPARE(model.mimeCommentAt(model.indexOfPath(m_dir + "/sub")), QStringLiteral("Папка"));
     }
 

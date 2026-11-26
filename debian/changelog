@@ -1,3 +1,12 @@
+shelf (0.6.0) unstable; urgency=medium
+
+  * Add split view, search filters, file templates and bulk rename.
+  * Preview PDF and office documents and browse GVfs locations.
+  * Move folder and thumbnail I/O to background tasks.
+  * Support FileManager1 and an optional resident process.
+
+ -- Stasyao37 <kapitonov.stass@gmail.com>  Fri, 27 Nov 2026 01:30:00 +0300
+
 shelf (0.5.3) unstable; urgency=medium
 
   * Send selected files and folders with LocalSend from the file menu.

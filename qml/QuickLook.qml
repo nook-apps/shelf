@@ -4,7 +4,7 @@ import QtQuick.Window
 import Shelf
 
 // Быстрый просмотр по пробелу, как Quick Look: картинка, начало текста,
-// крупная миниатюра (PDF, видео — от tumbler) или большой значок со сведениями.
+// первая страница документа, миниатюра или значок со сведениями.
 // Стрелки листают соседние файлы, Space и Esc закрывают, Enter открывает
 GlassDialog {
     id: dlg
@@ -12,44 +12,36 @@ GlassDialog {
     property DirModel model: null
     property int row: -1
     property var info: ({})
-    // image, text, dir, other — FileOps.previewKind
     property string kind: ""
-    property string text: ""
-    property bool textReady: false
-    property bool truncated: false
-    property bool binary: false
+    Preview { id: preview }
+    onAboutToHide: preview.cancel()
 
     // Открыть файл программой (Enter) — решает окно, как при двойном щелчке
     signal openRequested(int row)
 
     function show(m, r) {
         model = m
-        load(r)
+        if (!load(r)) return
         open()
     }
     function load(r) {
-        if (!model || r < 0 || r >= model.count) return
+        if (!model || r < 0 || r >= model.count) return false
         row = r
         info = model.rowInfo(r)
-        kind = FileOps.previewKind(info.path, info.mimeType)
-        text = ""
-        textReady = false
-        truncated = false
-        binary = false
-        if (kind === "text") FileOps.requestTextPreview(info.path)
+        kind = preview.kindFor(info.path, info.mimeType, info.isDir)
+        preview.open(info.path, kind)
+        return true
     }
     function step(d) {
         if (model) load(Math.max(0, Math.min(model.count - 1, row + d)))
     }
 
     Connections {
-        target: FileOps
-        function onTextPreview(path, text, truncated, binary) {
-            if (path !== dlg.info.path) return // пока читали, перелистнули дальше
-            dlg.text = text
-            dlg.truncated = truncated
-            dlg.binary = binary
-            dlg.textReady = true
+        target: dlg.visible ? dlg.model : null
+        function onDataChanged() {
+            const current = dlg.model.indexOfPath(dlg.info.path || "")
+            if (current >= 0 && dlg.model.mimeTypeAt(current) !== dlg.info.mimeType)
+                dlg.load(current)
         }
     }
 
@@ -58,11 +50,21 @@ GlassDialog {
     padding: 16
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-    // Миниатюра tumbler для того, что Qt не нарисует сам (PDF, видео, книги…)
-    readonly property string thumb: !visible || kind !== "other" || Thumbnailer.revision < 0 ? ""
-        : Thumbnailer.thumbnail(info.path, info.mimeType, Math.min(body.width, body.height))
-    readonly property bool showsIcon: kind === "dir" || (kind === "other" && thumb === "")
-        || (kind === "image" && picture.status === Image.Error) || (kind === "text" && binary)
+    readonly property bool document: kind === "pdf" || kind === "office"
+    readonly property bool fallback: preview.status === "unavailable" || preview.status === "failed" || preview.status === "timeout"
+    readonly property bool showsIcon: kind === "dir" || ((kind === "other" || fallback) && thumbnail.status !== Image.Ready)
+        || picture.status === Image.Error || preview.status === "binary"
+    readonly property string previewMessage: {
+        if (preview.status === "loading" || picture.status === Image.Loading) return qsTr("Загрузка просмотра…")
+        if (preview.status === "unavailable") return document
+            ? (kind === "office" ? qsTr("Для просмотра нужны LibreOffice и Poppler") : qsTr("Для просмотра PDF нужен Poppler"))
+            : qsTr("Просмотр недоступен")
+        if (preview.status === "timeout") return qsTr("Просмотр не успел загрузиться")
+        if (preview.status === "failed" || picture.status === Image.Error) return qsTr("Не удалось прочитать файл")
+        if (preview.status === "binary") return qsTr("Двоичный файл — просмотра нет")
+        if (kind === "other") return qsTr("Просмотр недоступен")
+        return ""
+    }
 
     contentItem: Item {
         focus: true
@@ -115,13 +117,23 @@ GlassDialog {
             id: body
             anchors { left: parent.left; right: parent.right; top: head.bottom; topMargin: 12; bottom: parent.bottom }
 
+            ThumbnailSource {
+                id: thumb
+                enabled: dlg.visible && (dlg.kind === "other" || dlg.document && dlg.fallback)
+                path: dlg.info.path || ""
+                mime: dlg.info.mimeType || ""
+                mtime: dlg.info.mtime ?? -1
+                size: Math.min(body.width, body.height)
+            }
+
             // Картинка — в фоне и не крупнее окна: большие фото не держат интерфейс
             Image {
                 id: picture
                 anchors.fill: parent
-                visible: dlg.kind === "image" && status === Image.Ready
+                visible: status === Image.Ready
                 // «#», «%» и пробелы в имени — экранируем, иначе это не тот URL
-                source: dlg.visible && dlg.kind === "image" ? "file://" + encodeURIComponent(dlg.info.path).replace(/%2F/g, "/") : ""
+                source: !dlg.visible ? "" : dlg.kind === "image"
+                    ? "file://" + encodeURIComponent(dlg.info.path).replace(/%2F/g, "/") : preview.image
                 asynchronous: true
                 fillMode: Image.PreserveAspectFit
                 sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
@@ -130,20 +142,22 @@ GlassDialog {
                 mipmap: true
             }
             Image {
+                id: thumbnail
                 anchors.fill: parent
-                visible: dlg.thumb !== "" && status === Image.Ready
-                source: dlg.thumb
+                visible: thumb.source !== "" && status === Image.Ready
+                source: thumb.source
                 asynchronous: true
+                sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
                 fillMode: Image.PreserveAspectFit
                 smooth: true
             }
 
             ScrollView {
                 anchors.fill: parent
-                visible: dlg.kind === "text" && dlg.textReady && !dlg.binary
+                visible: dlg.kind === "text" && preview.status === "ready"
                 clip: true
                 TextArea {
-                    text: dlg.text
+                    text: preview.text
                     readOnly: true
                     selectByMouse: true
                     // Клавиши остаются у просмотра: стрелки листают файлы, а не двигают курсор
@@ -161,7 +175,7 @@ GlassDialog {
 
             Column {
                 anchors.centerIn: parent
-                visible: dlg.showsIcon
+                visible: dlg.showsIcon || preview.status === "loading" || picture.status === Image.Loading
                 spacing: 14
                 FolderIcon {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -171,15 +185,15 @@ GlassDialog {
                 }
                 FileIcon {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: dlg.kind !== "dir"
+                    visible: dlg.showsIcon && dlg.kind !== "dir"
                     size: 128
                     mimeType: dlg.info.mimeType || ""
                     fileName: dlg.info.name || ""
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: dlg.binary
-                    text: qsTr("Двоичный файл — просмотра нет")
+                    visible: text !== ""
+                    text: dlg.previewMessage
                     color: Theme.subtext0
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize - 1
@@ -189,8 +203,8 @@ GlassDialog {
 
         Text {
             anchors { right: parent.right; bottom: parent.bottom; bottomMargin: -12 }
-            visible: dlg.kind === "text" && dlg.truncated && !dlg.binary
-            text: qsTr("Показано начало файла")
+            visible: dlg.document && picture.status === Image.Ready || preview.truncated && preview.status === "ready"
+            text: dlg.document ? qsTr("Первая страница") : qsTr("Показано начало файла")
             color: Theme.subtext0
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize - 3

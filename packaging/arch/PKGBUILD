@@ -1,7 +1,7 @@
 # Maintainer: Stasyao37 <kapitonov.stass@gmail.com>
 pkgname=shelf-fm
 _name=shelf
-pkgver=0.5.3
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="Glass file manager for Hyprland in Qt 6 / QML"
 arch=('x86_64' 'aarch64')
@@ -11,9 +11,14 @@ license=('GPL-3.0-or-later' 'OFL-1.1' 'MIT' 'CC0-1.0' 'Apache-2.0')
 # SVG и Wayland — плагины, грузятся во время работы
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland'
          'glib2' 'xdg-utils' 'hicolor-icon-theme' 'xdg-desktop-portal')
-makedepends=('cmake' 'ninja')
+makedepends=('cmake' 'ninja' 'pkgconf')
 optdepends=('tumbler: миниатюры картинок и PDF'
             'ffmpegthumbnailer: миниатюры видео'
+            'poppler: быстрый просмотр PDF'
+            'libreoffice-fresh: быстрый просмотр офисных документов'
+            'gvfs: сетевые папки и устройства'
+            'gvfs-smb: папки SMB'
+            'gvfs-mtp: телефоны MTP'
             'matugen: палитра из обоев'
             'libarchive: распаковка и сжатие архивов (bsdtar)')
 # В AUR уже есть shelf-git — другая программа (закладки на файлы); -fm — чтобы не путать

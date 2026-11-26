@@ -12,12 +12,11 @@ class Session : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
-    QML_SINGLETON
 
 public:
     explicit Session(QObject *parent = nullptr);
 
-    Q_INVOKABLE void save(const QStringList &paths, int current);
+    Q_INVOKABLE void save(const QStringList &paths, int current, const QVariantList &splits);
     // Окно закрыли сами — восстанавливать нечего
     Q_INVOKABLE void clear();
     // Самая свежая осиротевшая сессия: { paths, current } с существующими папками, либо пусто.
@@ -28,4 +27,5 @@ private:
     static QString dir();
     static QString bootId();
     QString ownFile() const;
+    const int m_window;
 };

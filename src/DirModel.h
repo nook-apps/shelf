@@ -6,8 +6,10 @@
 #include <QCollator>
 #include <QFileSystemWatcher>
 #include <QFuture>
+#include <QFutureWatcher>
 #include <QMimeDatabase>
 #include <QRegularExpression>
+#include <QSocketNotifier>
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 
@@ -27,7 +29,10 @@ class DirModel : public QAbstractListModel
     Q_PROPERTY(bool foldersFirst READ foldersFirst WRITE setFoldersFirst NOTIFY sortChanged)
     Q_PROPERTY(QString groupBy READ groupBy WRITE setGroupBy NOTIFY sortChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
+    Q_PROPERTY(QVariantMap searchOptions READ searchOptions WRITE setSearchOptions NOTIFY searchOptionsChanged)
     Q_PROPERTY(bool searching READ searching NOTIFY searchingChanged)
+    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    Q_PROPERTY(bool sorting READ sorting NOTIFY sortingChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QString freeSpace READ freeSpace NOTIFY freeSpaceChanged)
@@ -85,7 +90,11 @@ public:
     Q_INVOKABLE void setViewSort(const QString &key, bool desc, const QString &group, bool foldersFirst);
     QString searchQuery() const { return m_query; }
     void setSearchQuery(const QString &q);
+    QVariantMap searchOptions() const { return m_searchOptions; }
+    void setSearchOptions(const QVariantMap &options);
     bool searching() const { return m_searching; }
+    bool loading() const { return m_loading; }
+    bool sorting() const { return m_sortTask != nullptr; }
     int count() const { return int(m_rows.size()); }
     QString error() const { return m_error; }
     QString freeSpace() const;
@@ -99,6 +108,7 @@ public:
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE int indexOfPath(const QString &path) const;
+    Q_INVOKABLE int indexOfPrefix(const QString &prefix) const;
     Q_INVOKABLE QString pathAt(int row) const;
     Q_INVOKABLE bool isDirAt(int row) const;
     Q_INVOKABLE QString iconAt(int row) const;
@@ -116,7 +126,10 @@ signals:
     void showHiddenChanged();
     void sortChanged();
     void searchQueryChanged();
+    void searchOptionsChanged();
     void searchingChanged();
+    void loadingChanged();
+    void sortingChanged();
     void countChanged();
     void errorChanged();
     // Список перечитан (смена папки, изменения на диске) — QML восстанавливает выделение
@@ -125,18 +138,27 @@ signals:
 
 private:
     friend class TestCore;
-    void listDir();
+    void listDir(const QSet<QString> &changes = {});
+    void watchDirectory();
+    void readDirectoryEvents();
+    void stopListing();
+    void setLoading(bool loading);
     int groupFor(const FileEntry &entry, const QDate &today) const;
     QString groupLabel(int group) const;
     void applyFilterAndSort();
+    void present(const QList<FileEntry> &rows);
+    void phaseFinished();
+    void queueCount(const FileEntry &entry);
+    void countFolders();
+    void stopCounts();
     void refilter();
     void updateRows(const QList<FileEntry> &rows);
     void startSearch();
     void stopSearch();
-    void appendResults(quint64 gen, const QList<FileEntry> &batch);
+    void appendResults(const QList<FileEntry> &batch);
     void startSniff(const QList<FileEntry> &pending);
     void stopSniff();
-    void applySniffed(quint64 gen, const QList<FileEntry> &batch);
+    void applySniffed(const QList<FileEntry> &batch);
     bool useSniffed(FileEntry &e) const;
     void setError(const QString &e);
     bool lessThan(const FileEntry &a, const FileEntry &b) const;
@@ -144,6 +166,7 @@ private:
 
     QString m_path;
     QString m_query;
+    QVariantMap m_searchOptions;
     QString m_error;
     QString m_sortKey = QStringLiteral("name");
     bool m_sortDesc = false;
@@ -153,6 +176,7 @@ private:
     QTimer m_dateTimer;
     bool m_showHidden = false;
     bool m_searching = false;
+    bool m_loading = false;
     QStringList m_nameFilters;
     QList<QRegularExpression> m_nameRegex;
     QStringList m_mimeFilters;
@@ -162,21 +186,33 @@ private:
     bool m_settingPath = false;
 
     QList<FileEntry> m_all;   // всё содержимое папки, со скрытыми
+    QHash<QString, int> m_sourceIndex;
     QList<FileEntry> m_rows;  // то, что видно
+    mutable QHash<QString, int> m_pathIndex;
+    mutable bool m_pathIndexDirty = true;
 
     QMimeDatabase m_mime;
     QCollator m_collator;
     QFileSystemWatcher m_watcher;
     QTimer m_reloadTimer;
+    QSocketNotifier *m_eventNotifier = nullptr;
+    int m_eventFd = -1;
+    int m_watch = -1;
+    QSet<QString> m_changedPaths;
+    bool m_fullReload = false;
 
-    quint64 m_searchGen = 0;
-    std::shared_ptr<std::atomic_bool> m_searchCancel;
-    QFuture<void> m_searchFuture;
+    using Entries = QList<FileEntry>;
+    QFutureWatcher<Entries> *m_searchTask = nullptr;
+    QFutureWatcher<Entries> *m_listingTask = nullptr;
+    QFutureWatcher<Entries> *m_sortTask = nullptr;
+    QFutureWatcher<Entries> *m_countTask = nullptr;
+    QHash<QString, QPair<QDateTime, int>> m_counts;
+    QHash<QString, QDateTime> m_countQueue;
+    QSet<QString> m_countRunning;
+    QTimer m_countTimer;
 
     // Что не успели или не стали определять при листинге (FileEntry::typePending),
     // определяется в фоне; узнанное помним до смены папки, чтобы не определять заново
     QHash<QString, FileEntry> m_sniffed;
-    quint64 m_sniffGen = 0;
-    std::shared_ptr<std::atomic_bool> m_sniffCancel;
-    QFuture<void> m_sniffFuture;
+    QFutureWatcher<Entries> *m_sniffTask = nullptr;
 };

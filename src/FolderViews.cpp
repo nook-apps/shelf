@@ -1,4 +1,5 @@
 #include "FolderViews.h"
+#include "RemotePath.h"
 
 #include <limits>
 #include <QDateTime>
@@ -18,6 +19,7 @@ QString fileName()
 }
 QString key(const QString &path)
 {
+    if (isRemotePath(path)) return {};
     const QFileInfo info(path);
     return info.isDir() ? info.canonicalFilePath() : QString();
 }
@@ -25,10 +27,7 @@ QJsonObject readViews()
 {
     QFile f(fileName());
     if (!f.open(QIODevice::ReadOnly)) return {};
-    auto entries = QJsonDocument::fromJson(f.readAll()).object();
-    for (const auto &path : entries.keys())
-        if (key(path).isEmpty()) entries.remove(path);
-    return entries;
+    return QJsonDocument::fromJson(f.readAll()).object();
 }
 QVariantMap validated(const QVariantMap &view)
 {
@@ -44,11 +43,43 @@ QVariantMap validated(const QVariantMap &view)
 }
 }
 
-QVariantMap FolderViews::get(const QString &path) const
+FolderViews::FolderViews(QObject *parent) : QObject(parent)
 {
+    m_writeTimer.setSingleShot(true);
+    m_writeTimer.setInterval(250);
+    connect(&m_writeTimer, &QTimer::timeout, this, [this] { flush(); });
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { reload(); });
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { reload(); });
+}
+
+FolderViews::~FolderViews() { flush(100); }
+
+void FolderViews::reload()
+{
+    const QString file = fileName();
+    const QString parent = QFileInfo(file).absolutePath();
+    // Watch an existing ancestor too, so a first save in another process is detected.
+    QString ancestor = parent;
+    while (!QFileInfo(ancestor).isDir() && ancestor != QLatin1String("/"))
+        ancestor = QFileInfo(ancestor).absolutePath();
+    if (!m_watcher.directories().contains(ancestor)) {
+        const auto previous = m_watcher.directories();
+        if (!previous.isEmpty()) m_watcher.removePaths(previous);
+        m_watcher.addPath(ancestor);
+    }
+    if (QFileInfo::exists(file) && !m_watcher.files().contains(file))
+        m_watcher.addPath(file);
+    m_entries = readViews();
+    m_loaded = true;
+}
+
+QVariantMap FolderViews::get(const QString &path)
+{
+    if (!m_loaded) reload();
     const auto canonical = key(path);
     if (canonical.isEmpty()) return {};
-    return validated(readViews().value(canonical).toObject().toVariantMap());
+    const auto pending = m_changes.constFind(canonical);
+    return pending != m_changes.cend() ? *pending : validated(m_entries.value(canonical).toObject().toVariantMap());
 }
 bool FolderViews::save(const QString &path, const QVariantMap &view)
 {
@@ -60,20 +91,39 @@ bool FolderViews::update(const QString &path, const QVariantMap &view)
 {
     const auto canonical = key(path);
     if (canonical.isEmpty() || !QDir().mkpath(QFileInfo(fileName()).absolutePath())) return false;
+    m_changes.insert(canonical, view);
+    m_order.removeAll(canonical);
+    m_order.append(canonical);
+    if (!m_writeTimer.isActive()) m_writeTimer.start();
+    return true;
+}
+
+bool FolderViews::flush(int lockWait)
+{
+    if (m_changes.isEmpty()) return true;
     // Несколько окон не должны затирать изменения друг друга.
     QLockFile lock(fileName() + QStringLiteral(".lock"));
-    if (!lock.tryLock(100)) return false;
+    if (!lock.tryLock(lockWait)) {
+        if (!lockWait && lock.error() == QLockFile::LockFailedError) m_writeTimer.start();
+        else emit writeFailed();
+        return false;
+    }
     auto entries = readViews();
-    if (view.isEmpty()) entries.remove(canonical);
-    else {
+    if (entries.size() + m_changes.size() > limit) {
+        for (const auto &path : entries.keys())
+            if (key(path).isEmpty()) entries.remove(path);
+    }
+    qint64 saved = QDateTime::currentMSecsSinceEpoch();
+    for (auto it = entries.constBegin(); it != entries.constEnd(); ++it) {
+        const auto previous = it.value().toObject().value(QStringLiteral("saved")).toInteger();
+        if (previous >= saved && previous < std::numeric_limits<qint64>::max()) saved = previous + 1;
+    }
+    for (const QString &canonical : std::as_const(m_order)) {
+        const auto &view = m_changes[canonical];
+        if (view.isEmpty()) { entries.remove(canonical); continue; }
         auto entry = QJsonObject::fromVariantMap(view);
-        // Даже несколько правок за одну миллисекунду имеют однозначный порядок.
-        qint64 saved = QDateTime::currentMSecsSinceEpoch();
-        for (auto it = entries.begin(); it != entries.end(); ++it) {
-            const auto previous = it.value().toObject().value(QStringLiteral("saved")).toInteger();
-            if (previous >= saved && previous < std::numeric_limits<qint64>::max()) saved = previous + 1;
-        }
         entry.insert(QStringLiteral("saved"), saved);
+        if (saved < std::numeric_limits<qint64>::max()) ++saved;
         entries.insert(canonical, entry);
     }
     while (entries.size() > limit) {
@@ -86,7 +136,13 @@ bool FolderViews::update(const QString &path, const QVariantMap &view)
         entries.remove(oldest);
     }
     QSaveFile f(fileName());
-    if (!f.open(QIODevice::WriteOnly)) return false;
     const auto bytes = QJsonDocument(entries).toJson(QJsonDocument::Compact);
-    return f.write(bytes) == bytes.size() && f.commit();
+    if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) {
+        emit writeFailed();
+        return false;
+    }
+    m_changes.clear();
+    m_order.clear();
+    reload();
+    return true;
 }

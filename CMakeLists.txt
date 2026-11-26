@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(shelf VERSION 0.5.3 LANGUAGES CXX)
+project(shelf VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,13 +11,17 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 
 # 6.7 — из-за QStandardPaths::GenericStateLocation (~/.local/state)
 find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Concurrent DBus)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
 qt_standard_project_setup(REQUIRES 6.7)
 
-qt_add_executable(shelf src/main.cpp)
+qt_add_executable(shelf src/main.cpp src/FileManagerService.h src/FileManagerService.cpp)
 
 set(QML_FILES
     qml/Main.qml
+    qml/Bench.qml
     qml/Theme.qml
+    qml/ProcessSettings.qml
     qml/GlassButton.qml
     qml/Sidebar.qml
     qml/PathBar.qml
@@ -30,6 +34,7 @@ set(QML_FILES
     qml/GlassImage.qml
     qml/Badge.qml
     qml/Thumbnail.qml
+    qml/ThumbnailSource.qml
     qml/TextButton.qml
     qml/ConfirmDialog.qml
     qml/ConflictDialog.qml
@@ -44,8 +49,11 @@ set(QML_FILES
     qml/FirstRun.qml
     qml/GlassDialog.qml
     qml/QuickLook.qml
+    qml/SearchFilters.qml
+    qml/BulkRename.qml
+    qml/MountPrompt.qml
 )
-set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/Theme.qml qml/ProcessSettings.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 # Файлы лежат в qml/, но в модуле — в корне: иначе синглтон Theme
 # не виден из соседних файлов (неявный импорт идёт по каталогу файла)
 foreach(f ${QML_FILES})
@@ -79,12 +87,14 @@ qt_add_qml_module(shelf
         src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp
         src/FileOps.h src/FileOps.cpp
         src/Places.h src/Places.cpp
+        src/Mounts.h src/Mounts.cpp
         src/ThemeSource.h src/ThemeSource.cpp
         src/WallpaperPalette.h src/WallpaperPalette.cpp
         src/IconProvider.h
         src/GlassIcons.h src/GlassIcons.cpp
         src/FileEntry.h src/FileEntry.cpp
         src/Thumbnailer.h src/Thumbnailer.cpp
+        src/Preview.h src/Preview.cpp
         src/Apps.h src/Apps.cpp
         src/Trash.h src/Trash.cpp
         src/Session.h src/Session.cpp
@@ -106,13 +116,17 @@ qt_add_resources(shelf "i18n" PREFIX "/" FILES ${I18N_FILES})
 
 target_include_directories(shelf PRIVATE src)
 target_compile_definitions(shelf PRIVATE SHELF_VERSION="${PROJECT_VERSION}")
-target_link_libraries(shelf PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Concurrent Qt6::DBus)
+target_link_libraries(shelf PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Concurrent Qt6::DBus PkgConfig::GIO)
 target_compile_options(shelf PRIVATE -Wall -Wextra)
 
 include(GNUInstallDirs)
 install(TARGETS shelf RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 configure_file(data/io.github.nook_apps.Shelf.desktop.in io.github.nook_apps.Shelf.desktop @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/io.github.nook_apps.Shelf.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+foreach(service IN ITEMS io.github.nook_apps.Shelf org.freedesktop.FileManager1)
+    configure_file(data/file-manager.service.in ${service}.service @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${service}.service DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services)
+endforeach()
 # Иконка приложения: подробная — везде, включая меню лаунчеров;
 # упрощённый силуэт — только для 16 px (трей), где детали уже не различить
 install(FILES data/icons/io.github.nook_apps.Shelf.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
@@ -129,7 +143,8 @@ if(SHELF_TESTS)
     qt_add_executable(shelf_tests tests/tst_core.cpp
         src/DirModel.h src/DirModel.cpp src/GroupedModel.h src/GroupedModel.cpp src/FileOps.h src/FileOps.cpp src/FileEntry.h src/FileEntry.cpp
         src/Trash.h src/Trash.cpp src/Terminal.h src/Terminal.cpp src/Language.h src/Language.cpp
-        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp src/Apps.h src/Apps.cpp)
+        src/GlassIcons.h src/GlassIcons.cpp src/FolderViews.h src/FolderViews.cpp src/Apps.h src/Apps.cpp
+        src/Preview.h src/Preview.cpp)
     qt_add_resources(shelf_tests "i18n" PREFIX "/" FILES ${I18N_FILES})
     target_include_directories(shelf_tests PRIVATE src)
     target_link_libraries(shelf_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent)
@@ -138,12 +153,14 @@ if(SHELF_TESTS)
         src/Thumbnailer.h src/Thumbnailer.cpp src/portal/FileChooser.h src/portal/FileChooser.cpp)
     target_include_directories(shelf_resource_tests PRIVATE src)
     target_compile_definitions(shelf_resource_tests PRIVATE SHELF_EXE="/nonexistent-shelf-test-installed")
-    target_link_libraries(shelf_resource_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::DBus)
+    target_link_libraries(shelf_resource_tests PRIVATE Qt6::Test Qt6::Gui Qt6::Qml Qt6::DBus Qt6::Concurrent)
     add_test(NAME resources COMMAND shelf_resource_tests)
     # Все строки интерфейса переведены, лишних в словарях нет
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME i18n COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/i18n.py)
+        add_test(NAME bench-isolation COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/bench.py $<TARGET_FILE:shelf> --runs 1)
+        set_tests_properties(bench-isolation PROPERTIES TIMEOUT 180)
     endif()
     # FileOps слушает буфер обмена — нужен QGuiApplication, но без экрана
     set_tests_properties(core PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
